@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffcb52"/><stop offset="1" stop-color="#f2a81d"/></linearGradient></defs>
+  <rect width="512" height="512" rx="112" fill="url(#g)"/>
+  <g fill="#15171b">
+    <path fill-rule="evenodd" d="M90,94 L110,74 L240,74 L240,114 L130,114 L130,136 L212,136 L212,174 L130,174 L130,234 L90,234 Z M292,74 L422,74 L422,114 L312,114 L312,194 L422,194 L422,234 L292,234 L272,214 L272,94 Z M90,298 L110,278 L240,278 L240,318 L130,318 L130,340 L212,340 L212,378 L130,378 L130,438 L90,438 Z M272,278 L402,278 L422,298 L422,338 L408,358 L422,378 L422,418 L402,438 L272,438 Z M312,318 L382,318 L382,338 L312,338 Z M312,376 L382,376 L382,398 L312,398 Z"/>
+    <rect x="128" y="254" width="256" height="8" rx="4"/>
+    <rect x="171" y="241" width="10" height="34" rx="3"/><rect x="211" y="241" width="10" height="34" rx="3"/><rect x="251" y="241" width="10" height="34" rx="3"/><rect x="291" y="241" width="10" height="34" rx="3"/><rect x="331" y="241" width="10" height="34" rx="3"/>
+  </g>
+</svg>
