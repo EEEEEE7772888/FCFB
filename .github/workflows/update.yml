@@ -5,6 +5,7 @@ on:
     branches: [main]
   schedule:
     - cron: "0 14 * * *"     # players and stats: every day at 10 AM Eastern
+    - cron: "45 * * * 0,6"   # stats: every hour on Saturdays and Sundays (UTC)
     - cron: "30 */2 * * *"   # news: every 2 hours
   workflow_dispatch:          # adds a "Run workflow" button
 
@@ -32,14 +33,19 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Download players and stats
+      - name: Download players
         if: github.event_name != 'schedule' || github.event.schedule == '0 14 * * *'
         continue-on-error: true
         env:
           CFBD_API_KEY: ${{ secrets.CFBD_API_KEY }}
-        run: |
-          python fetch_players.py
-          python fetch_stats.py
+        run: python fetch_players.py
+
+      - name: Download stats
+        if: github.event_name != 'schedule' || github.event.schedule == '0 14 * * *' || github.event.schedule == '45 * * * 0,6'
+        continue-on-error: true
+        env:
+          CFBD_API_KEY: ${{ secrets.CFBD_API_KEY }}
+        run: python fetch_stats.py
 
       - name: Download news
         continue-on-error: true
