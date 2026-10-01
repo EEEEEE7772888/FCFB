@@ -471,3 +471,15 @@ table { width: 100%; border-collapse: collapse; }
 
 .tcell { display: flex; align-items: center; gap: 10px; }
 .stand td:first-child, .stand th:first-child { padding-right: 0; width: 28px; color: var(--faint); }
+
+/* ---------- News ---------- */
+.sec-row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin: 26px 4px 10px; }
+.sec-row .sec-title { margin: 0; }
+.news-row { display: block; padding: 13px 14px; border-bottom: 1px solid var(--line-soft); color: var(--text); text-decoration: none; }
+.news-row:active { background: var(--surface-2); }
+.news-t { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; font-weight: 650; font-size: 15px; line-height: 1.35; }
+.news-m { display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 12.5px; color: var(--muted); }
+.news-m b { color: var(--text); font-weight: 700; opacity: .85; }
+.news-tag { font-size: 11px; font-weight: 800; color: #fff; background: var(--accent); padding: 2px 7px; border-radius: 999px; }
+.news-more { display: block; width: 100%; padding: 13px; text-align: center; color: var(--accent); font-weight: 700; font-size: 14px; }
+.news-credit { margin: 8px 4px 0; }

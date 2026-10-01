@@ -219,8 +219,53 @@ function viewHome() {
     <h3>Start your first league</h3>
     <p>Pick your conferences, draft real college players, and play against friends or CPU managers.</p>
     <button class="btn btn-primary btn-lg" data-act="new">Create a league</button></div>`}
+  ${newsSection()}
   ${Store.mode === 'cloud' ? `<div class="account-row"><span class="muted small">Signed in as <b>${esc(Store.user.email || Store.displayName())}</b></span>
     <button class="link" data-act="signout">Sign out</button></div>` : ''}`;
+}
+
+/* ---------- News ---------- */
+function timeAgo(sec) {
+  if (!sec) return '';
+  const m = Math.max(1, Math.round((Date.now() / 1000 - sec) / 60));
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.round(h / 24);
+  return `${d}d ago`;
+}
+// Names of players on your teams, to tag headlines about them.
+function myPlayerNames() {
+  const names = new Set();
+  for (const lg of Store.list()) {
+    const t = lg.teams[userIdx(lg)];
+    if (!t) continue;
+    for (const pid of rosterOf(t)) {
+      const p = PMAP.get(pid);
+      if (p && p.pos !== 'DST' && p.name.length > 6) names.add(p.name.toLowerCase());
+    }
+  }
+  return [...names];
+}
+function newsSection() {
+  if (typeof NEWS === 'undefined' || !NEWS || !Array.isArray(NEWS.items) || !NEWS.items.length) return '';
+  const mine = myPlayerNames();
+  const all = NEWS.items.map(n => {
+    const low = n.t.toLowerCase();
+    return Object.assign({}, n, { mine: mine.some(name => low.includes(name)) });
+  });
+  // Headlines about your players go first.
+  all.sort((x, y) => (y.mine - x.mine) || (y.d - x.d));
+  const shown = all.slice(0, UI.newsAll ? 30 : 6);
+  const rows = shown.map(n => `<a class="news-row" href="${esc(n.u)}" target="_blank" rel="noopener noreferrer">
+      <span class="news-t">${esc(n.t)}</span>
+      <span class="news-m">${n.mine ? '<span class="news-tag">Your player</span>' : ''}<b>${esc(n.s)}</b>${n.d ? ` · ${timeAgo(n.d)}` : ''}</span>
+    </a>`).join('');
+  return `<div class="sec-row"><h2 class="sec-title">College football news</h2>
+      ${NEWS.updated ? `<span class="muted small">Updated ${timeAgo(Date.parse(NEWS.updated) / 1000)}</span>` : ''}</div>
+    <div class="list-card news">${rows}
+      ${all.length > 6 ? `<button class="news-more" data-act="news-more">${UI.newsAll ? 'Show less' : 'More headlines'}</button>` : ''}</div>
+    <p class="muted small news-credit">Headlines come from ESPN and other news sites. Tap one to read the full story there.</p>`;
 }
 
 /* ---------- Sign in ---------- */
@@ -1046,6 +1091,7 @@ const actions = {
       .catch(err => { UI.auth.error = authError(err); render(); });
   },
   account() { UI.modal = { type: 'account' }; render(); },
+  'news-more'() { UI.newsAll = !UI.newsAll; render(); },
   signout() { UI.modal = null; UI.leagueId = null; UI.view = 'home'; Store.signOut(); },
   import() {
     Store.importDeviceLeagues().then(n => toast(`Added ${n} league${n === 1 ? '' : 's'} to your account.`))
