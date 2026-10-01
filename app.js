@@ -156,7 +156,7 @@ function header(lg) {
   if (!lg) {
     return `<header class="topbar"><div class="topbar-in">
       <button class="brand" data-act="home" aria-label="Home">
-        <span class="brand-mark">GS</span><span class="brand-name">Gridiron Saturday</span>
+        <span class="brand-mark">FC</span><span class="brand-name">FCFB</span>
       </button>
       ${Store.mode === 'cloud' && Store.user ? `<button class="tb-account" data-act="account" aria-label="Account">${esc((Store.displayName()[0] || '?').toUpperCase())}</button>` : ''}
     </div></header>`;
@@ -215,7 +215,7 @@ function viewHome() {
   ${deviceCount ? `<div class="banner info" style="margin-top:14px"><span>You have ${deviceCount} league${deviceCount === 1 ? '' : 's'} saved on this device from before accounts.</span>
     <button class="btn btn-sm" data-act="import">Add to my account</button></div>` : ''}
   ${cards ? `<div class="list-card">${cards}</div>` : `<div class="empty-card">
-    <div class="brand-mark big">GS</div>
+    <div class="brand-mark big">FC</div>
     <h3>Start your first league</h3>
     <p>Pick your conferences, draft real college players, and play against friends or CPU managers.</p>
     <button class="btn btn-primary btn-lg" data-act="new">Create a league</button></div>`}
@@ -275,8 +275,8 @@ function viewAuth() {
   const up = s.mode === 'signup';
   return `
   <section class="auth-hero">
-    <div class="brand-mark big">GS</div>
-    <h1>${joining ? 'You\'re invited' : 'Gridiron Saturday'}</h1>
+    <div class="brand-mark big">FC</div>
+    <h1>${joining ? 'You\'re invited' : 'FCFB'}</h1>
     <p>${joining ? 'Sign in to join your friend\'s league.' : 'College fantasy football. Sign in to keep your leagues on every device and play with friends.'}</p>
   </section>
   <div class="card auth-card">
