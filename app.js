@@ -66,6 +66,40 @@ function newCreateState() {
 }
 function resetFilters() { UI.f = { pos: 'ALL', conf: 'ALL', q: '', sort: 'proj' }; }
 
+/* ---------- Avatars ----------
+   Player icons use the school's color with the jersey number;
+   team icons use initials with a color picked from the name. */
+const SCHOOL_COLOR = new Map(
+  (typeof REAL_DATA !== 'undefined' && REAL_DATA && REAL_DATA.teams ? REAL_DATA.teams : [])
+    .filter(t => t.color).map(t => [t.school, t.color]));
+function isLight(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex || '');
+  if (!m) return false;
+  const n = parseInt(m[1], 16);
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  return (0.299 * r + 0.587 * g + 0.114 * b) > 170;
+}
+function schoolColor(p) {
+  const c = SCHOOL_COLOR.get(p.team);
+  if (c && /^#[0-9a-f]{6}$/i.test(c)) return c;
+  const conf = CONF_MAP.get(p.conf);
+  return conf ? conf.color : '#3a414b';
+}
+function playerAvatar(p, size = '') {
+  const bg = schoolColor(p);
+  const label = p.pos === 'DST' ? 'D' : (p.num !== '' && p.num != null ? p.num : p.name.split(' ').map(s => s[0]).join('').slice(0, 2));
+  return `<span class="av ${size}" style="background:${bg};color:${isLight(bg) ? '#111' : '#fff'}">${esc(String(label))}</span>`;
+}
+const TEAM_HUES = [212, 4, 145, 268, 32, 188, 330, 96, 48, 240, 0, 170];
+function teamAvatar(t, size = '') {
+  const name = (t && t.name) || '?';
+  let h = 0;
+  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const hue = TEAM_HUES[h % TEAM_HUES.length];
+  const initials = name.replace(/[^A-Za-z0-9 ]/g, '').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('') || '?';
+  return `<span class="av team ${size}" style="background:hsl(${hue} 55% 38%)">${esc(initials)}</span>`;
+}
+
 /* ---------- Icons ---------- */
 const ICON = {
   team: '<svg viewBox="0 0 24 24"><path d="M6 4l3-1h6l3 1 3 4-3 2v10H6V10L3 8z"/></svg>',
@@ -123,13 +157,15 @@ function header(lg) {
     return `<header class="topbar"><div class="topbar-in">
       <button class="brand" data-act="home" aria-label="Home">
         <span class="brand-mark">GS</span><span class="brand-name">Gridiron Saturday</span>
-      </button></div></header>`;
+      </button>
+      ${Store.mode === 'cloud' && Store.user ? `<button class="tb-account" data-act="account" aria-label="Account">${esc((Store.displayName()[0] || '?').toUpperCase())}</button>` : ''}
+    </div></header>`;
   }
   const status = lg.phase === 'lobby' ? 'Lobby' : lg.phase === 'draft' ? 'Draft' : lg.phase === 'done' ? 'Final' : weekLabel(lg.week);
   return `<header class="topbar"><div class="topbar-in">
     <button class="icon-btn" data-act="home" aria-label="All leagues"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
     <div class="tb-title"><div class="tb-name">${esc(lg.name)}</div>
-      <div class="tb-sub">${esc(confsLabel(lg.conferences))}, ${lg.size} teams, ${SCORING_LABEL[lg.scoring]}${usesReal(lg) ? ', real stats' : ''}</div></div>
+      <div class="tb-sub">${esc(confsLabel(lg.conferences))} · ${lg.size} teams · ${SCORING_LABEL[lg.scoring]}</div></div>
     <span class="tb-pill">${status}</span>
   </div></header>`;
 }
@@ -159,25 +195,30 @@ function viewHome() {
   const cards = Store.list().map(lg => {
     const me = lg.teams[userIdx(lg)];
     const friends = humanCount(lg) - 1;
+    const rank = me && !['lobby', 'draft'].includes(lg.phase) ? standings(lg).findIndex(x => x.id === me.id) + 1 : 0;
     return `<button class="league-card" data-act="open" data-id="${lg.id}">
-      <div class="lc-top"><span class="lc-name">${esc(lg.name)}</span>${leagueStatus(lg)}</div>
-      <div class="lc-meta">${esc(confsLabel(lg.conferences))}, ${lg.size} teams, ${SCORING_LABEL[lg.scoring]}${lg.multi ? `, ${friends} friend${friends === 1 ? '' : 's'}` : ''}</div>
-      <div class="lc-me"><span>${me ? esc(me.name) : ''}</span>${me && !['lobby', 'draft'].includes(lg.phase) ? `<b>${record(me)}</b>` : ''}</div>
+      ${teamAvatar(me, 'lg')}
+      <span class="lc-body">
+        <span class="lc-name">${me ? esc(me.name) : esc(lg.name)}</span>
+        <span class="lc-meta">${esc(lg.name)} · ${lg.size} teams${lg.multi ? ` · ${friends} friend${friends === 1 ? '' : 's'}` : ''}</span>
+        <span class="lc-status">${leagueStatus(lg)}</span>
+      </span>
+      ${rank ? `<span class="lc-rec"><b>${record(me)}</b><small>${ordinal(rank)}</small></span>` : ''}
+      <svg class="chev" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg>
     </button>`;
   }).join('');
   const deviceCount = Store.deviceLeagues().length;
   return `
-  <section class="hero">
-    <div class="hero-field" aria-hidden="true"></div>
-    <h1 class="hero-h">College fantasy football</h1>
-    <p class="hero-p">Pick the conferences you care about, draft real college players, and play against friends or CPU managers.</p>
-    <button class="btn btn-gold btn-lg" data-act="new">Create a league</button>
-  </section>
+  <div class="page-title"><h1>Leagues</h1>
+    <button class="btn btn-primary btn-sm" data-act="new"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>New league</button></div>
   ${Store.error ? `<div class="banner bad" style="margin-top:14px">${esc(Store.error)}</div>` : ''}
   ${deviceCount ? `<div class="banner info" style="margin-top:14px"><span>You have ${deviceCount} league${deviceCount === 1 ? '' : 's'} saved on this device from before accounts.</span>
     <button class="btn btn-sm" data-act="import">Add to my account</button></div>` : ''}
-  <h2 class="sec-title">Your leagues</h2>
-  ${cards || `<div class="empty-card">No leagues yet. Create one, or open an invite link from a friend.</div>`}
+  ${cards ? `<div class="list-card">${cards}</div>` : `<div class="empty-card">
+    <div class="brand-mark big">GS</div>
+    <h3>Start your first league</h3>
+    <p>Pick your conferences, draft real college players, and play against friends or CPU managers.</p>
+    <button class="btn btn-primary btn-lg" data-act="new">Create a league</button></div>`}
   ${Store.mode === 'cloud' ? `<div class="account-row"><span class="muted small">Signed in as <b>${esc(Store.user.email || Store.displayName())}</b></span>
     <button class="link" data-act="signout">Sign out</button></div>` : ''}`;
 }
@@ -188,10 +229,10 @@ function viewAuth() {
   const joining = UI.join && UI.join.id;
   const up = s.mode === 'signup';
   return `
-  <section class="hero auth-hero">
-    <div class="hero-field" aria-hidden="true"></div>
-    <h1 class="hero-h">${joining ? 'You\'re invited' : 'College fantasy football'}</h1>
-    <p class="hero-p">${joining ? 'Sign in to join your friend\'s league.' : 'Sign in to keep your leagues on every device and play with friends.'}</p>
+  <section class="auth-hero">
+    <div class="brand-mark big">GS</div>
+    <h1>${joining ? 'You\'re invited' : 'Gridiron Saturday'}</h1>
+    <p>${joining ? 'Sign in to join your friend\'s league.' : 'College fantasy football. Sign in to keep your leagues on every device and play with friends.'}</p>
   </section>
   <div class="card auth-card">
     <button class="btn btn-block btn-lg google-btn" data-act="google" ${s.busy ? 'disabled' : ''}>
@@ -400,8 +441,9 @@ function viewLobby(lg) {
 /* ---------- Shared player pieces ---------- */
 function pmain(p, extra = '') {
   return `<button class="pmain" data-act="player" data-id="${p.id}">
-    <span class="pname">${esc(p.name)}</span>
-    <span class="pmeta">${posBadge(p.pos)}<span class="ellip">${esc(p.team)}${extra}</span></span>
+    ${playerAvatar(p)}
+    <span class="ptext"><span class="pname">${esc(p.pos === 'DST' ? p.team + ' D/ST' : p.name)}</span>
+    <span class="pmeta">${posBadge(p.pos)}<span class="ellip">${esc(p.team)}${extra}</span></span></span>
   </button>`;
 }
 function filterBar(lg, withSort) {
@@ -603,9 +645,9 @@ function viewTeam(lg) {
     const lastPts = p && lastW ? `, last ${fmt(weekPts(lg, p, lastW))}` : '';
     const num = !p ? '' : done ? `<b>${fmt(seasonPts(lg, p))}</b><small>season</small>`
       : bye ? `<b class="bye">Bye</b><small>wk ${w}</small>` : `<b>${fmt(weekProj(lg, p, w))}</b><small>proj</small>`;
-    return `<div class="lrow ${isSel ? 'sel' : ''} ${mv && !isSel && !isT ? 'dim' : ''} ${bye || (!p && slot !== 'BN') ? 'warn' : ''}">
+    return `<div class="lrow ${isSel ? 'sel' : ''} ${mv && !isSel && !isT ? 'dim' : ''} ${slot !== 'BN' && (bye || !p) ? 'warn' : ''}">
       <div class="slot">${posLabel(slot)}</div>
-      ${p ? pmain(p, `, bye ${p.bye}${lastPts}`) : '<div class="pmain empty">Empty</div>'}
+      ${p ? pmain(p, `${p.bye ? `, bye ${p.bye}` : ''}${lastPts}`) : '<div class="pmain empty">Empty</div>'}
       <div class="pnum">${num}</div>${btn}</div>`;
   };
 
@@ -630,8 +672,9 @@ function viewTeam(lg) {
 
   return `
   <section class="team-head">
-    <div><div class="th-name">${esc(t.name)}</div>
-      <div class="th-sub">${record(t)}, ${ordinal(rank)} place, ${fmt(t.pf)} pts for</div></div>
+    ${teamAvatar(t, 'xl')}
+    <div class="th-body"><div class="th-name">${esc(t.name)}</div>
+      <div class="th-sub">${record(t)} · ${ordinal(rank)} place · ${fmt(t.pf)} PF</div></div>
     ${done ? '' : `<div class="th-proj"><b>${fmt(projTotal)}</b><small>${weekLabel(w)} proj</small></div>`}
   </section>
   ${done ? `<div class="banner gold">${isMe(lg.teams[lg.champion]) ? 'You won the championship.' : `${esc(lg.teams[lg.champion].name)} won the championship.`} Numbers below are season totals.</div>` : ''}
@@ -717,14 +760,24 @@ function matchCard(lg, g, w, played, me) {
     const bye = isBye(p, w);
     const meta = played ? statLine(lg, p, w, line.pts) : bye ? 'Bye week' : `${posLabel(p.pos)}, ${p.team}`;
     return `<div class="mside ${side} ${bye ? 'bye' : ''}">
-      <button class="mp" data-act="player" data-id="${p.id}"><span class="mp-name">${esc(shortName(p))}</span><span class="mp-meta">${esc(meta)}</span></button>
+      ${playerAvatar(p, 'sm')}<button class="mp" data-act="player" data-id="${p.id}"><span class="mp-name">${esc(shortName(p))}</span><span class="mp-meta">${esc(meta)}</span></button>
       <div class="mp-pts ${played ? '' : 'proj'}">${bye ? '—' : fmt(line.pts)}</div></div>`;
   };
   const rows = al.map((l, i) => `<div class="mrow">${cell(l, 'l')}<div class="mslot">${posLabel(l.slot)}</div>${cell(bl[i], 'r')}</div>`).join('');
+  // Win chance from the projected gap (only before the week is scored).
+  const pa = played ? null : 1 / (1 + Math.exp(-(as - bs) / 14));
+  const side = (t, s, win, right) => `<div class="sbg-team ${right ? 'r' : ''} ${win ? 'win' : ''}">
+      ${teamAvatar(t, 'lg')}
+      <div class="sbg-name">${esc(t.name)}</div>
+      <div class="sbg-rec">${record(t)}${isMe(t) ? ' · You' : ''}</div>
+      <div class="sbg-score">${fmt(s)}</div>
+    </div>`;
   return `<section class="scorebug">
-    <div class="sbg-team ${aWin ? 'win' : ''}"><div class="sbg-name">${esc(ta.name)}</div><div class="sbg-rec">${record(ta)}</div><div class="sbg-score">${fmt(as)}</div></div>
-    <div class="sbg-mid"><span>${weekLabel(w)}</span><b>${played ? 'Final' : 'Projected'}</b></div>
-    <div class="sbg-team r ${bWin ? 'win' : ''}"><div class="sbg-name">${esc(tb.name)}</div><div class="sbg-rec">${record(tb)}</div><div class="sbg-score">${fmt(bs)}</div></div>
+    <div class="sbg-top">${side(ta, as, aWin, false)}
+      <div class="sbg-mid"><span>${weekLabel(w)}</span><b>${played ? 'Final' : 'Projected'}</b></div>
+      ${side(tb, bs, bWin, true)}</div>
+    ${pa === null ? '' : `<div class="wp"><div class="wp-bar"><i style="width:${Math.round(pa * 100)}%"></i></div>
+      <div class="wp-labels"><span>${Math.round(pa * 100)}%</span><span>Win probability</span><span>${100 - Math.round(pa * 100)}%</span></div></div>`}
   </section>
   <div class="card flush match">${rows}</div>`;
 }
@@ -749,7 +802,7 @@ function faList(lg) {
   const shown = list.slice(0, 100);
   if (!shown.length) return `<div class="empty-card">No free agents match those filters.</div>`;
   return shown.map(p => `<div class="prow">
-    ${pmain(p, `, ${esc(confShort(p.conf))}, bye ${p.bye}`)}
+    ${pmain(p, `, ${esc(confShort(p.conf))}${p.bye ? `, bye ${p.bye}` : ''}`)}
     ${hasPts ? `<div class="pnum"><b>${fmt(seasonPts(lg, p))}</b><small>season</small></div>` : ''}
     <div class="pnum"><b>${fmt(projPts(p, lg.scoring))}</b><small>proj</small></div>
     <button class="btn btn-sm btn-primary" data-act="add" data-id="${p.id}" ${done ? 'disabled' : ''} aria-label="Add ${esc(p.name)}">Add</button>
@@ -760,7 +813,7 @@ function faList(lg) {
 function viewStandings(lg) {
   const st = standings(lg);
   const rows = st.map((t, i) => `<tr class="${isMe(t) ? 'me' : ''} ${i === PLAYOFF_TEAMS - 1 ? 'cut' : ''}">
-    <td class="num">${i + 1}</td><td class="tname">${esc(t.name)}</td><td class="num">${record(t)}</td>
+    <td class="num">${i + 1}</td><td class="tname"><span class="tcell">${teamAvatar(t, 'sm')}<span>${esc(t.name)}</span></span></td><td class="num">${record(t)}</td>
     <td class="num">${fmt(t.pf)}</td><td class="num">${fmt(t.pa)}</td></tr>`).join('');
   let bracket = '';
   if (lg.seeds) {
@@ -833,6 +886,9 @@ function viewModal(lg) {
   else if (m.type === 'delete') {
     inner = `<h3 class="m-h">Delete this league?</h3><p class="muted">This removes the league and all of its results${lg && lg.multi ? ' for everyone in it' : ''}.</p>
       <div class="m-actions"><button class="btn" data-act="close-modal">Keep league</button><button class="btn btn-danger" data-act="confirm-delete">Delete league</button></div>`;
+  } else if (m.type === 'account') {
+    inner = `<h3 class="m-h">Account</h3><p class="muted">Signed in as <b>${esc(Store.user ? (Store.user.email || Store.displayName()) : '')}</b></p>
+      <div class="m-actions"><button class="btn" data-act="close-modal">Close</button><button class="btn btn-danger" data-act="signout">Sign out</button></div>`;
   } else if (m.type === 'leave') {
     inner = `<h3 class="m-h">Leave this league?</h3><p class="muted">A CPU manager takes over your team. You can rejoin later with an invite link if a spot is open.</p>
       <div class="m-actions"><button class="btn" data-act="close-modal">Stay</button><button class="btn btn-danger" data-act="confirm-leave">Leave league</button></div>`;
@@ -858,7 +914,7 @@ function playerModal(lg, p) {
     else if (owner === me) action = `<button class="btn btn-danger btn-block" data-act="drop" data-id="${p.id}">Drop from my team</button>`;
   }
   return `<div class="pm-head" style="--conf:${conf.color}">
-      <div class="pm-num">${p.pos === 'DST' ? 'D' : p.num}</div>
+      ${playerAvatar(p, 'xl')}
       <div><div class="pm-name">${esc(p.name)}</div>
         <div class="pm-meta">${posBadge(p.pos)} ${esc(p.team)}, ${esc(conf.name)}${p.year ? `, ${p.year}` : ''}</div></div>
     </div>
@@ -866,7 +922,7 @@ function playerModal(lg, p) {
       <div><b>${fmt(projPts(p, lg.scoring))}</b><small>Proj per game</small></div>
       <div><b>${last ? fmt(seasonPts(lg, p)) : '—'}</b><small>Season pts</small></div>
       <div><b>${rankOf(lg, p.id) || '—'}</b><small>League rank</small></div>
-      <div><b>Wk ${p.bye}</b><small>Bye</small></div>
+      <div><b>${p.bye ? 'Wk ' + p.bye : 'None'}</b><small>Bye</small></div>
     </div>
     <p class="muted small">${owner == null ? 'Free agent' : owner === me ? 'On your team' : `On ${esc(lg.teams[owner].name)}`}</p>
     ${log ? `<div class="table-wrap"><table class="glog"><thead><tr><th>Wk</th><th>Line</th><th class="num">Pts</th></tr></thead><tbody>${log}</tbody></table></div>` : ''}
@@ -989,7 +1045,8 @@ const actions = {
       .then(() => toast('Check your email for a link to reset your password.'))
       .catch(err => { UI.auth.error = authError(err); render(); });
   },
-  signout() { UI.leagueId = null; UI.view = 'home'; Store.signOut(); },
+  account() { UI.modal = { type: 'account' }; render(); },
+  signout() { UI.modal = null; UI.leagueId = null; UI.view = 'home'; Store.signOut(); },
   import() {
     Store.importDeviceLeagues().then(n => toast(`Added ${n} league${n === 1 ? '' : 's'} to your account.`))
       .catch(err => { console.error(err); toast("Couldn't move those leagues. Try again."); });
