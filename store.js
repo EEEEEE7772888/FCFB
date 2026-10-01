@@ -16,6 +16,7 @@ const Store = {
   user: null,          // signed-in Firebase user (cloud mode)
   authReady: !CLOUD_READY,
   error: '',
+  loaded: false,       // first list of leagues has arrived
   onChange: () => {},
   _unsub: null,
 
@@ -23,6 +24,7 @@ const Store = {
   init() {
     if (this.mode === 'local') {
       ME_UID = 'local';
+      this.loaded = true;
       this._loadLocal();
       return;
     }
@@ -34,6 +36,7 @@ const Store = {
       this.authReady = true;
       if (this._unsub) { this._unsub(); this._unsub = null; }
       this.leagues.clear();
+      this.loaded = false;
       if (user) {
         ME_UID = user.uid;
         this._listen();
@@ -164,12 +167,14 @@ const Store = {
       .where('memberUids', 'array-contains', ME_UID)
       .onSnapshot(snap => {
         this.error = '';
+        this.loaded = true;
         this.leagues.clear();
         snap.forEach(d => {
           try { this.leagues.set(d.id, this._unwrap(d.data())); } catch (e) { /* skip broken */ }
         });
         this.onChange();
       }, err => {
+        this.loaded = true;
         this.error = err && err.code === 'permission-denied'
           ? 'The database blocked this request. Check the Firestore rules.'
           : "Couldn't reach the database. Check your connection.";

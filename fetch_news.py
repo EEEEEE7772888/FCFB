@@ -23,6 +23,16 @@ FEEDS = [
     ("Google News", "https://news.google.com/rss/search?q=%22college+football%22+when:3d&hl=en-US&gl=US&ceid=US:en"),
 ]
 NEWS_FILE = "news.js"
+PLAYERS_FILE = "players.js"
+
+# Words that mean a story is about something else (other sports, lower divisions).
+SKIP_WORDS = ["high school", "basketball", "baseball", "softball", "volleyball", "soccer",
+              "hockey", "lacrosse", "wrestling", "division ii", "division iii", "d-ii", "d-iii",
+              "naia", "juco", "junior college", "women's"]
+# Big-picture topics that are always FBS football news.
+TOPIC_WORDS = ["college football playoff", "cfp", "heisman", "ap top 25", "ap poll", "coaches poll",
+               "sec", "big ten", "big 12", "acc", "pac-12", "mountain west", "sun belt",
+               "american athletic", "conference usa", "mac", "transfer portal", "bowl"]
 KEEP = 40               # how many headlines to save
 MAX_AGE_DAYS = 4        # skip anything older than this
 
@@ -72,11 +82,39 @@ def parse(name, raw):
     return items
 
 
+def load_schools():
+    """FBS school names from players.js, so news can be filtered to those schools."""
+    try:
+        text = open(PLAYERS_FILE, encoding="utf-8").read()
+        data = json.loads(text[text.index("{"):].strip().rstrip(";"))
+        return sorted({t["school"] for t in data.get("teams", []) if t.get("school")}, key=len, reverse=True)
+    except (OSError, ValueError, KeyError):
+        return []
+
+
+def mentions(title, words):
+    low = title.lower()
+    return [w for w in words if re.search(r"(?<![a-z])" + re.escape(w.lower()) + r"(?![a-z])", low)]
+
+
+def match_schools(title, schools):
+    """Schools named in a title. Longer names go first and claim their words,
+    so "North Texas" doesn't also count as "Texas"."""
+    low, found = title.lower(), []
+    for school in schools:  # already longest first
+        pat = r"(?<![a-z])" + re.escape(school.lower()) + r"(?![a-z])"
+        if re.search(pat, low):
+            found.append(school)
+            low = re.sub(pat, " " * len(school), low)
+    return found
+
+
 def key(title):
     return re.sub(r"[^a-z0-9]", "", title.lower())[:60]
 
 
 def main():
+    schools = load_schools()
     collected, seen = [], set()
     for name, url in FEEDS:
         try:
@@ -86,6 +124,16 @@ def main():
             print(f"{name}: skipped ({e})")
             continue
         for item in got:
+            title = item["t"]
+            if mentions(title, SKIP_WORDS):
+                continue
+            found = match_schools(title, schools) if schools else []
+            # ESPN's feed is already FBS college football. Other sources must
+            # mention an FBS school or a big college football topic.
+            if name != "ESPN" and schools and not found and not mentions(title, TOPIC_WORDS):
+                continue
+            if found:
+                item["sc"] = found[:4]
             k = key(item["t"])
             if k and k not in seen:
                 seen.add(k)
