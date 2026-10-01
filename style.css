@@ -483,3 +483,6 @@ table { width: 100%; border-collapse: collapse; }
 .news-tag { font-size: 11px; font-weight: 800; color: #fff; background: var(--accent); padding: 2px 7px; border-radius: 999px; }
 .news-more { display: block; width: 100%; padding: 13px; text-align: center; color: var(--accent); font-weight: 700; font-size: 14px; }
 .news-credit { margin: 8px 4px 0; }
+
+.mv.locked { display: grid; place-items: center; background: transparent; color: var(--faint); }
+.mv.locked svg { width: 18px; height: 18px; }

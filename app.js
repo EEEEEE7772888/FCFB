@@ -616,7 +616,7 @@ function rosterReadOnly(lg, t) {
 }
 
 /* ---------- My Team ---------- */
-function moveTargets(t, mv) {
+function moveTargets(t, mv, locked = () => false) {
   const T = new Set();
   const fromS = mv[0] === 'S' ? +mv.slice(1) : null;
   const fromPid = fromS !== null ? t.starters[fromS].pid : mv.slice(1);
@@ -625,15 +625,34 @@ function moveTargets(t, mv) {
   t.starters.forEach((s, i) => {
     const k = 'S' + i;
     if (k === mv) return;
+    if (locked(s.pid)) return;
     const op = s.pid && PMAP.get(s.pid);
     const okOut = !op || ELIG[fromSlot].includes(op.pos);
     if (fp && ELIG[s.slot].includes(fp.pos) && okOut) T.add(k);
     if (!fp && op && okOut) T.add(k);
   });
   if (fromS !== null) {
-    t.bench.forEach(pid => { if (ELIG[fromSlot].includes(PMAP.get(pid).pos)) T.add('B' + pid); });
+    t.bench.forEach(pid => { if (!locked(pid) && ELIG[fromSlot].includes(PMAP.get(pid).pos)) T.add('B' + pid); });
   }
   return T;
+}
+/* Best projected lineup, but players whose games are over stay where they are. */
+function autoLineupUnlocked(lg, t, w) {
+  const locked = pid => isLocked(lg, pid);
+  const keepStart = new Set(t.starters.filter(s => locked(s.pid)).map(s => s.pid));
+  const keepBench = t.bench.filter(locked);
+  const free = rosterOf(t).filter(pid => !locked(pid)).map(id => PMAP.get(id))
+    .sort((x, y) => weekProj(lg, y, w) - weekProj(lg, x, w));
+  const used = new Set();
+  const order = [...STARTERS.keys()].sort((x, y) => (STARTERS[x] === 'FLEX') - (STARTERS[y] === 'FLEX'));
+  const next = t.starters.map(s => ({ slot: s.slot, pid: keepStart.has(s.pid) ? s.pid : null }));
+  for (const i of order) {
+    if (next[i].pid) continue;
+    const p = free.find(x => !used.has(x.id) && ELIG[next[i].slot].includes(x.pos));
+    if (p) { next[i].pid = p.id; used.add(p.id); }
+  }
+  t.starters = next;
+  t.bench = keepBench.concat(free.filter(p => !used.has(p.id)).map(p => p.id));
 }
 function doMove(t, mv, target) {
   const fromS = mv[0] === 'S' ? +mv.slice(1) : null;
@@ -671,7 +690,7 @@ function viewTeam(lg) {
   const lastW = lastPlayedWeek(lg);
   const rank = standings(lg).findIndex(x => x.id === t.id) + 1;
   const mv = UI.move;
-  const targets = mv ? moveTargets(t, mv) : null;
+  const targets = mv ? moveTargets(t, mv, pid => isLocked(lg, pid)) : null;
 
   const problems = t.starters.filter(s => !s.pid || isBye(PMAP.get(s.pid), w));
   const projTotal = t.starters.reduce((a, s) => a + (s.pid ? weekProj(lg, PMAP.get(s.pid), w) : 0), 0);
@@ -682,14 +701,18 @@ function viewTeam(lg) {
     const isT = targets && targets.has(key);
     const bye = p && !done && isBye(p, w);
     let btn = '';
-    if (!done) {
+    const locked = isLocked(lg, pid);
+    if (!done && locked && !mv) btn = `<span class="mv locked" title="His game is over, so he's locked for this week"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></span>`;
+    else if (!done) {
       if (mv) btn = isSel ? `<button class="mv on" data-act="move-cancel" aria-label="Cancel move">Cancel</button>`
         : isT ? `<button class="mv here" data-act="move-to" data-id="${key}">Here</button>` : `<span class="mv ghost"></span>`;
       else btn = `<button class="mv" data-act="move" data-id="${key}">Move</button>`;
     }
     const lastPts = p && lastW ? `, last ${fmt(weekPts(lg, p, lastW))}` : '';
     const num = !p ? '' : done ? `<b>${fmt(seasonPts(lg, p))}</b><small>season</small>`
-      : bye ? `<b class="bye">Bye</b><small>wk ${w}</small>` : `<b>${fmt(weekProj(lg, p, w))}</b><small>proj</small>`;
+      : bye ? `<b class="bye">Bye</b><small>wk ${w}</small>`
+      : gameDone(lg, p, w) ? `<b>${fmt(weekPts(lg, p, w))}</b><small>pts</small>`
+      : `<b>${fmt(weekProj(lg, p, w))}</b><small>proj</small>`;
     return `<div class="lrow ${isSel ? 'sel' : ''} ${mv && !isSel && !isT ? 'dim' : ''} ${slot !== 'BN' && (bye || !p) ? 'warn' : ''}">
       <div class="slot">${posLabel(slot)}</div>
       ${p ? pmain(p, `${p.bye ? `, bye ${p.bye}` : ''}${lastPts}`) : '<div class="pmain empty">Empty</div>'}
@@ -737,13 +760,28 @@ function ordinal(n) {
 }
 
 /* ---------- Matchup ---------- */
+/* A player's real game for week w is finished (real-stats leagues only).
+   Finished players show real points and are locked in your lineup. */
+function gameDone(lg, p, w) {
+  if (!usesReal(lg) || !p) return false;
+  const wk = REAL_STATS.weeks[w];
+  return !!(wk && wk.dst && wk.dst[p.team] !== undefined);
+}
+function isLocked(lg, pid) {
+  return !!pid && lg.phase !== 'done' && gameDone(lg, PMAP.get(pid), lg.week);
+}
 function liveGame(lg, a, b, w) {
   const f = ti => {
-    const lines = lg.teams[ti].starters.map(s => ({ slot: s.slot, pid: s.pid, pts: s.pid ? weekProj(lg, PMAP.get(s.pid), w) : 0 }));
+    const lines = lg.teams[ti].starters.map(s => {
+      const p = s.pid && PMAP.get(s.pid);
+      const done = gameDone(lg, p, w);
+      return { slot: s.slot, pid: s.pid, done, pts: !p ? 0 : done ? weekPts(lg, p, w) : weekProj(lg, p, w) };
+    });
     return { lines, total: round1(lines.reduce((x, l) => x + l.pts, 0)) };
   };
   const A = f(a), B = f(b);
-  return { a, b, as: A.total, bs: B.total, al: A.lines, bl: B.lines, winner: null };
+  const live = A.lines.concat(B.lines).some(l => l.done);
+  return { a, b, as: A.total, bs: B.total, al: A.lines, bl: B.lines, winner: null, live };
 }
 function viewMatchup(lg) {
   const me = userIdx(lg);
@@ -803,10 +841,11 @@ function matchCard(lg, g, w, played, me) {
     const p = line.pid && PMAP.get(line.pid);
     if (!p) return `<div class="mside ${side}"><div class="mp"><span class="mp-name empty">Empty</span></div><div class="mp-pts">0.0</div></div>`;
     const bye = isBye(p, w);
-    const meta = played ? statLine(lg, p, w, line.pts) : bye ? 'Bye week' : `${posLabel(p.pos)}, ${p.team}`;
+    const real = played || line.done;
+    const meta = real ? statLine(lg, p, w, line.pts) : bye ? 'Bye week' : `${posLabel(p.pos)}, ${p.team}`;
     return `<div class="mside ${side} ${bye ? 'bye' : ''}">
       ${playerAvatar(p, 'sm')}<button class="mp" data-act="player" data-id="${p.id}"><span class="mp-name">${esc(shortName(p))}</span><span class="mp-meta">${esc(meta)}</span></button>
-      <div class="mp-pts ${played ? '' : 'proj'}">${bye ? '—' : fmt(line.pts)}</div></div>`;
+      <div class="mp-pts ${real ? '' : 'proj'}">${bye ? '—' : fmt(line.pts)}</div></div>`;
   };
   const rows = al.map((l, i) => `<div class="mrow">${cell(l, 'l')}<div class="mslot">${posLabel(l.slot)}</div>${cell(bl[i], 'r')}</div>`).join('');
   // Win chance from the projected gap (only before the week is scored).
@@ -819,7 +858,7 @@ function matchCard(lg, g, w, played, me) {
     </div>`;
   return `<section class="scorebug">
     <div class="sbg-top">${side(ta, as, aWin, false)}
-      <div class="sbg-mid"><span>${weekLabel(w)}</span><b>${played ? 'Final' : 'Projected'}</b></div>
+      <div class="sbg-mid"><span>${weekLabel(w)}</span><b>${played ? 'Final' : g.live ? 'In progress' : 'Projected'}</b></div>
       ${side(tb, bs, bWin, true)}</div>
     ${pa === null ? '' : `<div class="wp"><div class="wp-bar"><i style="width:${Math.round(pa * 100)}%"></i></div>
       <div class="wp-labels"><span>${Math.round(pa * 100)}%</span><span>Win probability</span><span>${100 - Math.round(pa * 100)}%</span></div></div>`}
@@ -986,6 +1025,33 @@ function dropModal(lg, add) {
 /* =========================================================
    CPU draft pacing
    ========================================================= */
+/* Auto-scoring. When real games for a week are finished, the first person
+   in the league to open the app scores it (only one save ever counts). */
+const scoreTried = new Map();
+function autoScore() {
+  if (busy) return;
+  for (const lg of Store.list()) {
+    if (!usesReal(lg) || !['season', 'playoffs'].includes(lg.phase) || userIdx(lg) < 0) continue;
+    if (!weekReady(lg, lg.week)) continue;
+    const key = lg.id + ':' + lg.week;
+    if (Date.now() - (scoreTried.get(key) || 0) < 60000) continue;
+    scoreTried.set(key, Date.now());
+    const startWeek = lg.week;
+    let n = 0;
+    Store.update(lg.id, fresh => {
+      n = 0;
+      if (fresh.week !== startWeek) return false;
+      while (['season', 'playoffs'].includes(fresh.phase) && weekReady(fresh, fresh.week)) {
+        if (!playWeek(fresh)) break;
+        n++;
+      }
+      return n > 0;
+    }).then(ok => {
+      if (ok && n) toast(`${lg.name}: ${n === 1 ? weekLabel(startWeek) + ' is' : n + ' weeks are'} final.`);
+    }).catch(err => console.error(err));
+  }
+}
+
 /* Draft automation. Every quarter second, the open league checks whether
    a pick is due: a CPU team, a team with auto-draft on, or a live-draft
    timer that ran out. Every friend's browser runs this, but each pick is
@@ -1221,11 +1287,17 @@ const actions = {
   'move-to'(id) {
     const mv = UI.move;
     UI.move = null;
-    mutate(lg => { const t = lg.teams[userIdx(lg)]; if (!t) return false; doMove(t, mv, id); });
+    mutate(lg => {
+      const t = lg.teams[userIdx(lg)];
+      if (!t) return false;
+      const pidOf = k => k === 'BENCH' ? null : k[0] === 'S' ? t.starters[+k.slice(1)].pid : k.slice(1);
+      if (isLocked(lg, pidOf(mv)) || isLocked(lg, pidOf(id))) return false;
+      doMove(t, mv, id);
+    });
   },
   autoset() {
     UI.move = null;
-    mutate(lg => { const t = lg.teams[userIdx(lg)]; if (!t) return false; autoLineup(lg, t, lg.week); },
+    mutate(lg => { const t = lg.teams[userIdx(lg)]; if (!t) return false; autoLineupUnlocked(lg, t, lg.week); },
       'Lineup set to your best projected starters.');
   },
   add(id) {
@@ -1254,7 +1326,7 @@ const actions = {
       // New player takes the dropped player's spot if eligible, else the bench.
       const si = t.starters.findIndex(s => s.pid === id);
       removeFromRoster(t, id);
-      if (si >= 0 && ELIG[t.starters[si].slot].includes(PMAP.get(add).pos)) t.starters[si].pid = add;
+      if (si >= 0 && !isLocked(lg, add) && ELIG[t.starters[si].slot].includes(PMAP.get(add).pos)) t.starters[si].pid = add;
       else t.bench.push(add);
     }, `Added ${PMAP.get(add).name}, dropped ${PMAP.get(id).name}.`);
   },
@@ -1395,9 +1467,12 @@ window.addEventListener('hashchange', readInvite);
       lastPhase[lg.id] = lg.phase;
     }
     render();
+    setTimeout(autoScore, 500);
   };
   Store.init();
   readInvite();
   render();
   setInterval(() => { draftTick(); updateClock(); }, 250);
+  setInterval(autoScore, 15000);
+  setTimeout(autoScore, 1200);
 })();
