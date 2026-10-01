@@ -164,29 +164,101 @@ function makeSchedule(n, weeks, r) {
   return out;
 }
 
-function createLeague({ name, teamName, size, scoring, conferences, pointsFrom }) {
+/* ---------- Who's playing ----------
+   ME_UID is the signed-in person (or 'local' when saving only on this device).
+   A team with an ownerUid belongs to a person; teams without one are CPU. */
+let ME_UID = 'local';
+function isHuman(t) { return !!t.ownerUid; }
+function isMe(t) { return !!t && t.ownerUid === ME_UID; }
+function humanCount(lg) { return lg.teams.filter(isHuman).length; }
+function isCommish(lg) { return lg.commissioner === ME_UID; }
+
+function blankTeam(id, name) {
+  return {
+    id, name, ownerUid: null, ownerName: '', autoDraft: false,
+    starters: STARTERS.map(s => ({ slot: s, pid: null })), bench: [],
+    w: 0, l: 0, t: 0, pf: 0, pa: 0,
+  };
+}
+
+function createLeague({ name, teamName, size, scoring, conferences, pointsFrom,
+  ownerUid = ME_UID, ownerName = '', multi = false, draftType = 'live', pickSeconds = 90 }) {
   const seed = uid() + Date.now().toString(36);
   const r = rngFor(seed, 'setup');
   const names = shuffle(CPU_TEAM_NAMES.slice(), r);
-  const userSlot = Math.floor(r() * size); // your draft position
   const teams = [];
-  let ni = 0;
-  for (let i = 0; i < size; i++) {
-    const isUser = i === userSlot;
-    teams.push({
-      id: i, name: isUser ? teamName : names[ni++], isUser,
-      starters: STARTERS.map(s => ({ slot: s, pid: null })), bench: [],
-      w: 0, l: 0, t: 0, pf: 0, pa: 0,
-    });
+  if (multi) {
+    // Friends league: your team plus open spots until the draft starts.
+    teams.push(Object.assign(blankTeam(0, teamName), { ownerUid, ownerName }));
+    for (let i = 1; i < size; i++) teams.push(Object.assign(blankTeam(i, 'Open spot'), { open: true }));
+  } else {
+    const userSlot = Math.floor(r() * size); // your draft position
+    let ni = 0;
+    for (let i = 0; i < size; i++) {
+      const t = blankTeam(i, i === userSlot ? teamName : names[ni++]);
+      if (i === userSlot) { t.ownerUid = ownerUid; t.ownerName = ownerName; }
+      teams.push(t);
+    }
   }
   const lg = {
-    id: uid(), seed, name, size, scoring, conferences: conferences.slice(),
-    created: Date.now(), phase: 'draft', week: 1, teams, picks: [],
+    id: uid() + uid().slice(0, 4), seed, name, size, scoring, conferences: conferences.slice(),
+    created: Date.now(), phase: multi ? 'lobby' : 'draft', week: 1, teams, picks: [],
     schedule: makeSchedule(size, REG_WEEKS, r), results: {}, seeds: null, champion: null,
     pointsFrom: pointsFrom === 'real' && HAS_REAL_STATS ? 'real' : 'sim',
+    multi, draftType: multi ? draftType : 'live', pickSeconds: multi && draftType === 'live' ? pickSeconds : 0,
+    pickStartedAt: Date.now(), commissioner: ownerUid, memberUids: [ownerUid],
   };
   lg.repl = computeRepl(leaguePool(lg), size, scoring);
   return lg;
+}
+
+/* Turn old saved leagues (from before accounts) into the current shape. */
+function normalizeLeague(lg) {
+  for (const t of lg.teams) {
+    if (t.isUser && !t.ownerUid) t.ownerUid = ME_UID;
+    delete t.isUser;
+    if (t.autoDraft === undefined) t.autoDraft = false;
+  }
+  if (!lg.memberUids) lg.memberUids = lg.teams.filter(isHuman).map(t => t.ownerUid);
+  if (!lg.commissioner) lg.commissioner = lg.memberUids[0] || ME_UID;
+  if (lg.multi === undefined) lg.multi = false;
+  if (!lg.pickStartedAt) lg.pickStartedAt = Date.now();
+  if (lg.pickSeconds === undefined) lg.pickSeconds = 0;
+  return lg;
+}
+
+/* Friends joining: take the first open spot (or a CPU team after the draft). */
+function joinLeague(lg, uidToAdd, ownerName, teamName) {
+  if (lg.memberUids.includes(uidToAdd)) return 'already';
+  const t = lg.teams.find(x => x.open) || lg.teams.find(x => !x.ownerUid);
+  if (!t) return 'full';
+  t.ownerUid = uidToAdd; t.ownerName = ownerName; t.open = false;
+  t.name = teamName || ownerName || 'New Team';
+  lg.memberUids.push(uidToAdd);
+  return 'joined';
+}
+function leaveLeague(lg, uidToRemove) {
+  const t = lg.teams.find(x => x.ownerUid === uidToRemove);
+  if (t) {
+    t.ownerUid = null; t.ownerName = ''; t.autoDraft = false;
+    if (lg.phase === 'lobby') { t.open = true; t.name = 'Open spot'; }
+  }
+  lg.memberUids = lg.memberUids.filter(u => u !== uidToRemove);
+}
+/* Commissioner starts the draft: random draft order, open spots become CPU teams. */
+function startDraft(lg) {
+  if (lg.phase !== 'lobby') return false;
+  const r = rngFor(lg.seed, 'order');
+  const names = shuffle(CPU_TEAM_NAMES.slice(), r).filter(n => !lg.teams.some(t => t.name === n));
+  let ni = 0;
+  for (const t of lg.teams) {
+    if (t.open) { t.open = false; t.name = names[ni++] || `CPU ${t.id + 1}`; }
+  }
+  lg.teams = shuffle(lg.teams, r);
+  lg.teams.forEach((t, i) => { t.id = i; });
+  lg.phase = 'draft';
+  lg.pickStartedAt = Date.now();
+  return true;
 }
 
 /* ---------- Draft ---------- */
@@ -200,9 +272,10 @@ function onClock(lg) {
   return n >= totalPicks(lg) ? -1 : teamAtPick(n, lg.size);
 }
 function pickInfo(n, size) { return { round: Math.floor(n / size) + 1, pick: (n % size) + 1, overall: n + 1 }; }
-function userIdx(lg) { return lg.teams.findIndex(t => t.isUser); }
+function userIdx(lg) { return lg.teams.findIndex(isMe); }
 function picksUntilUser(lg) {
   const me = userIdx(lg);
+  if (me < 0) return -1;
   for (let n = lg.picks.length; n < totalPicks(lg); n++) {
     if (teamAtPick(n, lg.size) === me) return n - lg.picks.length;
   }
@@ -213,6 +286,7 @@ function makePick(lg, pid) {
   if (ti < 0 || !pid || ownerMap(lg).has(pid)) return false;
   lg.picks.push({ ti, pid });
   addToRoster(lg.teams[ti], pid);
+  lg.pickStartedAt = Date.now();
   if (lg.picks.length >= totalPicks(lg)) finishDraft(lg);
   return true;
 }
@@ -356,7 +430,7 @@ function playWeek(lg) {
   if (lg.phase === 'draft' || lg.phase === 'done') return null;
   const w = lg.week;
   if (!weekReady(lg, w)) return null;
-  lg.teams.forEach(t => { if (!t.isUser) autoLineup(lg, t, w); });
+  lg.teams.forEach(t => { if (!isHuman(t)) autoLineup(lg, t, w); });
   const games = gamesForWeek(lg, w);
   lg.results[w] = games.map(([a, b]) => {
     const A = scoreTeam(lg, a, w), B = scoreTeam(lg, b, w);

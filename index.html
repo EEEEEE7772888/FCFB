@@ -15,11 +15,19 @@
   <div id="modal-root"></div>
   <div id="toast" role="status" aria-live="polite"></div>
 
-  <!-- Load order matters: players, stats, data, engine, then app -->
+  <!-- Firebase (accounts and online leagues). If firebase-config.js isn't
+       filled in, the app saves leagues on this device instead. -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="firebase-config.js"></script>
+
+  <!-- Load order matters: players, stats, data, engine, store, then app -->
   <script src="players.js"></script>
   <script src="stats.js"></script>
   <script src="data.js"></script>
   <script src="engine.js"></script>
+  <script src="store.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

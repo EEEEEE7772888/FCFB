@@ -429,3 +429,17 @@ table { width: 100%; border-collapse: collapse; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* ---------- Accounts and friends ---------- */
+.account-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin: 22px 2px 0; }
+.auth-hero { padding-bottom: 22px; }
+.auth-card { margin-top: 14px; }
+.google-btn { margin-top: 0; gap: 10px; background: var(--card); }
+.google-btn svg { width: 20px; height: 20px; }
+.or { display: flex; align-items: center; gap: 10px; margin: 16px 0; color: var(--muted); font-size: 13px; }
+.or::before, .or::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+.auth-links { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.invite-row { display: flex; gap: 8px; }
+.invite-row .input { flex: 1; min-width: 0; font-size: 14px; }
+.pick-timer { font-family: var(--f-cond); font-weight: 700; font-size: 17px; color: var(--amber); margin-left: 4px; }
+.pick-timer.low { color: #ff8a80; }

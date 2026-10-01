@@ -1,0 +1,26 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /leagues/{leagueId} {
+      // Signed-in people can view a league (needed to open an invite link).
+      allow read: if request.auth != null;
+
+      // You can create a league only as its commissioner and first member.
+      allow create: if request.auth != null
+        && request.resource.data.commissioner == request.auth.uid
+        && request.auth.uid in request.resource.data.memberUids;
+
+      // Members can update their league. Someone new can only add
+      // themselves (joining). Nobody can change the commissioner.
+      allow update: if request.auth != null
+        && request.resource.data.commissioner == resource.data.commissioner
+        && (request.auth.uid in resource.data.memberUids
+            || (request.auth.uid in request.resource.data.memberUids
+                && request.resource.data.memberUids.size() == resource.data.memberUids.size() + 1));
+
+      // Only the commissioner can delete the league.
+      allow delete: if request.auth != null
+        && resource.data.commissioner == request.auth.uid;
+    }
+  }
+}

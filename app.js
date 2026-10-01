@@ -3,29 +3,37 @@
    APP — screens, events, and saving to the browser.
    ========================================================= */
 
-const STORE_KEY = 'gridiron-saturday-v1';
-let DB = loadDB();
 const UI = {
-  view: 'home', tab: 'team', dtab: 'players',
+  view: 'home', tab: 'team', dtab: 'players', leagueId: null,
   f: { pos: 'ALL', conf: 'ALL', q: '', sort: 'proj' },
   move: null, modal: null, week: null, game: null, paused: false, create: null,
+  auth: { mode: 'signin', email: '', pw: '', error: '', busy: false },
+  join: null, // { id, lg, teamName, busy, error }
 };
-let draftTimer = null;
+let busy = false; // a save is in progress
 
-function loadDB() {
-  try {
-    const raw = localStorage.getItem(STORE_KEY);
-    if (raw) {
-      const d = JSON.parse(raw);
-      if (d && Array.isArray(d.leagues)) return d;
-    }
-  } catch (e) { /* storage unavailable */ }
-  return { leagues: [], activeId: null };
+function activeLeague() { return UI.leagueId ? Store.get(UI.leagueId) : null; }
+function canAct(lg) { return !!lg && userIdx(lg) >= 0; }
+
+/* Save a change to the open league. fn changes the newest copy and can
+   return false to skip. Shows a message when done. */
+function mutate(fn, okMsg) {
+  const id = UI.leagueId;
+  if (!id) return Promise.resolve(false);
+  busy = true;
+  return Store.update(id, fn).then(ok => {
+    busy = false;
+    if (ok && okMsg) toast(typeof okMsg === 'function' ? okMsg() : okMsg);
+    render();
+    return ok;
+  }).catch(err => {
+    busy = false;
+    console.error(err);
+    toast("Couldn't save that. Check your connection and try again.");
+    render();
+    return false;
+  });
 }
-function save() {
-  try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch (e) { /* ignore */ }
-}
-function activeLeague() { return DB.leagues.find(l => l.id === DB.activeId) || null; }
 
 /* ---------- Formatting helpers ---------- */
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -54,7 +62,7 @@ function toast(msg) {
   toast._t = setTimeout(() => el.classList.remove('show'), 2600);
 }
 function newCreateState() {
-  return { name: 'Saturday League', teamName: 'My Team', size: 10, scoring: 'ppr', pointsFrom: HAS_REAL_STATS ? 'real' : 'sim', confs: new Set(['SEC', 'BIG10', 'BIG12', 'ACC']) };
+  return { name: 'Saturday League', teamName: 'My Team', size: 10, scoring: 'ppr', pointsFrom: HAS_REAL_STATS ? 'real' : 'sim', multi: false, draftType: 'live', pickSeconds: 90, confs: new Set(['SEC', 'BIG10', 'BIG12', 'ACC']) };
 }
 function resetFilters() { UI.f = { pos: 'ALL', conf: 'ALL', q: '', sort: 'proj' }; }
 
@@ -66,13 +74,13 @@ const ICON = {
   standings: '<svg viewBox="0 0 24 24"><path d="M5 20V11M12 20V5M19 20v-6"/></svg>',
   league: '<svg viewBox="0 0 24 24"><path d="M5 3v18M5 4h12l-2 4 2 4H5"/></svg>',
   draft: '<svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>',
+  lobby: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-3 3-5 6-5s6 2 6 5M16 11a3 3 0 1 0 0-6M18 15c2 .6 3 2.3 3 5"/></svg>',
 };
 
 /* =========================================================
    RENDER
    ========================================================= */
 function render() {
-  clearTimeout(draftTimer);
   const ae = document.activeElement;
   const focusId = ae && ae.id;
   const caret = ae && typeof ae.selectionStart === 'number' ? ae.selectionStart : null;
@@ -83,10 +91,18 @@ function render() {
   const lg = activeLeague();
   if (UI.view === 'league' && !lg) UI.view = 'home';
   const app = document.getElementById('app');
-  let html = header(UI.view === 'league' ? lg : null);
-  if (UI.view === 'create') html += `<main class="main">${viewCreate()}</main>`;
-  else if (UI.view === 'league') html += `<main class="main has-nav">${viewLeague(lg)}</main>` + bottomNav(lg);
-  else html += `<main class="main">${viewHome()}</main>`;
+  let html;
+  if (!Store.authReady) {
+    html = header(null) + `<main class="main"><div class="empty-card">Loading…</div></main>`;
+  } else if (Store.mode === 'cloud' && !Store.user) {
+    html = header(null) + `<main class="main">${viewAuth()}</main>`;
+  } else {
+    html = header(UI.view === 'league' ? lg : null);
+    if (UI.view === 'create') html += `<main class="main">${viewCreate()}</main>`;
+    else if (UI.view === 'join') html += `<main class="main">${viewJoin()}</main>`;
+    else if (UI.view === 'league') html += `<main class="main has-nav">${viewLeague(lg)}</main>` + bottomNav(lg);
+    else html += `<main class="main">${viewHome()}</main>`;
+  }
   app.innerHTML = html;
   document.getElementById('modal-root').innerHTML = UI.modal ? viewModal(lg) : '';
 
@@ -99,7 +115,7 @@ function render() {
       if (caret !== null) { try { el.setSelectionRange(caret, caret); } catch (e) { /* ignore */ } }
     }
   }
-  scheduleCpu(lg);
+  updateClock();
 }
 
 function header(lg) {
@@ -109,7 +125,7 @@ function header(lg) {
         <span class="brand-mark">GS</span><span class="brand-name">Gridiron Saturday</span>
       </button></div></header>`;
   }
-  const status = lg.phase === 'draft' ? 'Draft' : lg.phase === 'done' ? 'Final' : weekLabel(lg.week);
+  const status = lg.phase === 'lobby' ? 'Lobby' : lg.phase === 'draft' ? 'Draft' : lg.phase === 'done' ? 'Final' : weekLabel(lg.week);
   return `<header class="topbar"><div class="topbar-in">
     <button class="icon-btn" data-act="home" aria-label="All leagues"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
     <div class="tb-title"><div class="tb-name">${esc(lg.name)}</div>
@@ -119,7 +135,9 @@ function header(lg) {
 }
 
 function bottomNav(lg) {
-  const tabs = lg.phase === 'draft'
+  const tabs = lg.phase === 'lobby'
+    ? [['lobby', 'Lobby'], ['league', 'League']]
+    : lg.phase === 'draft'
     ? [['draft', 'Draft'], ['league', 'League']]
     : [['team', 'My Team'], ['matchup', 'Matchup'], ['players', 'Players'], ['standings', 'Standings'], ['league', 'League']];
   return `<nav class="bottomnav">${tabs.map(([k, label]) =>
@@ -127,28 +145,117 @@ function bottomNav(lg) {
 }
 
 /* ---------- Home ---------- */
+function leagueStatus(lg) {
+  const me = userIdx(lg);
+  if (lg.phase === 'lobby') return `<span class="tag">Waiting to draft</span>`;
+  if (lg.phase === 'draft') {
+    return onClock(lg) === me && me >= 0
+      ? `<span class="tag tag-gold">Your pick!</span>` : `<span class="tag tag-live">Drafting</span>`;
+  }
+  if (lg.phase === 'done') return `<span class="tag tag-gold">${isMe(lg.teams[lg.champion]) ? 'Champion' : 'Season over'}</span>`;
+  return `<span class="tag">${weekLabel(lg.week)}</span>`;
+}
 function viewHome() {
-  const cards = DB.leagues.map(lg => {
-    const me = lg.teams.find(t => t.isUser);
-    let status;
-    if (lg.phase === 'draft') status = `<span class="tag tag-live">Drafting</span>`;
-    else if (lg.phase === 'done') status = `<span class="tag tag-gold">${lg.teams[lg.champion].isUser ? 'Champion' : 'Season over'}</span>`;
-    else status = `<span class="tag">${weekLabel(lg.week)}</span>`;
+  const cards = Store.list().map(lg => {
+    const me = lg.teams[userIdx(lg)];
+    const friends = humanCount(lg) - 1;
     return `<button class="league-card" data-act="open" data-id="${lg.id}">
-      <div class="lc-top"><span class="lc-name">${esc(lg.name)}</span>${status}</div>
-      <div class="lc-meta">${esc(confsLabel(lg.conferences))}, ${lg.size} teams, ${SCORING_LABEL[lg.scoring]}</div>
-      <div class="lc-me"><span>${esc(me.name)}</span>${lg.phase !== 'draft' ? `<b>${record(me)}</b>` : ''}</div>
+      <div class="lc-top"><span class="lc-name">${esc(lg.name)}</span>${leagueStatus(lg)}</div>
+      <div class="lc-meta">${esc(confsLabel(lg.conferences))}, ${lg.size} teams, ${SCORING_LABEL[lg.scoring]}${lg.multi ? `, ${friends} friend${friends === 1 ? '' : 's'}` : ''}</div>
+      <div class="lc-me"><span>${me ? esc(me.name) : ''}</span>${me && !['lobby', 'draft'].includes(lg.phase) ? `<b>${record(me)}</b>` : ''}</div>
     </button>`;
   }).join('');
+  const deviceCount = Store.deviceLeagues().length;
   return `
   <section class="hero">
     <div class="hero-field" aria-hidden="true"></div>
     <h1 class="hero-h">College fantasy football</h1>
-    <p class="hero-p">Pick the conferences you care about, draft players from those schools, and play a full season against CPU managers.</p>
+    <p class="hero-p">Pick the conferences you care about, draft real college players, and play against friends or CPU managers.</p>
     <button class="btn btn-gold btn-lg" data-act="new">Create a league</button>
   </section>
+  ${Store.error ? `<div class="banner bad" style="margin-top:14px">${esc(Store.error)}</div>` : ''}
+  ${deviceCount ? `<div class="banner info" style="margin-top:14px"><span>You have ${deviceCount} league${deviceCount === 1 ? '' : 's'} saved on this device from before accounts.</span>
+    <button class="btn btn-sm" data-act="import">Add to my account</button></div>` : ''}
   <h2 class="sec-title">Your leagues</h2>
-  ${cards || `<div class="empty-card">No leagues yet. Create one to start drafting.</div>`}`;
+  ${cards || `<div class="empty-card">No leagues yet. Create one, or open an invite link from a friend.</div>`}
+  ${Store.mode === 'cloud' ? `<div class="account-row"><span class="muted small">Signed in as <b>${esc(Store.user.email || Store.displayName())}</b></span>
+    <button class="link" data-act="signout">Sign out</button></div>` : ''}`;
+}
+
+/* ---------- Sign in ---------- */
+function viewAuth() {
+  const s = UI.auth;
+  const joining = UI.join && UI.join.id;
+  const up = s.mode === 'signup';
+  return `
+  <section class="hero auth-hero">
+    <div class="hero-field" aria-hidden="true"></div>
+    <h1 class="hero-h">${joining ? 'You\'re invited' : 'College fantasy football'}</h1>
+    <p class="hero-p">${joining ? 'Sign in to join your friend\'s league.' : 'Sign in to keep your leagues on every device and play with friends.'}</p>
+  </section>
+  <div class="card auth-card">
+    <button class="btn btn-block btn-lg google-btn" data-act="google" ${s.busy ? 'disabled' : ''}>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" stroke="none" d="M22 12.2c0-.7-.1-1.4-.2-2H12v3.8h5.6a4.8 4.8 0 0 1-2.1 3.1v2.6h3.4c2-1.8 3.1-4.5 3.1-7.5z"/><path fill="#34A853" stroke="none" d="M12 22c2.8 0 5.2-.9 6.9-2.5l-3.4-2.6c-.9.6-2.1 1-3.5 1-2.7 0-5-1.8-5.8-4.3H2.7v2.7A10 10 0 0 0 12 22z"/><path fill="#FBBC05" stroke="none" d="M6.2 13.6a6 6 0 0 1 0-3.8V7.1H2.7a10 10 0 0 0 0 9.2z"/><path fill="#EA4335" stroke="none" d="M12 6c1.5 0 2.9.5 4 1.5l3-3A10 10 0 0 0 2.7 7.1l3.5 2.7C7 7.8 9.3 6 12 6z"/></svg>
+      Continue with Google</button>
+    <div class="or"><span>or use email</span></div>
+    <label class="field"><span>Email</span>
+      <input id="a-email" class="input" type="email" autocomplete="email" data-afield="email" value="${esc(s.email)}"></label>
+    <label class="field"><span>Password${up ? ' (at least 6 characters)' : ''}</span>
+      <input id="a-pw" class="input" type="password" autocomplete="${up ? 'new-password' : 'current-password'}" data-afield="pw" value="${esc(s.pw)}"></label>
+    ${s.error ? `<div class="banner bad">${esc(s.error)}</div>` : ''}
+    <button class="btn btn-primary btn-block btn-lg" data-act="email-auth" ${s.busy ? 'disabled' : ''}>${up ? 'Create account' : 'Sign in'}</button>
+    <div class="auth-links">
+      <button class="link" data-act="auth-mode">${up ? 'Have an account? Sign in' : 'New here? Create an account'}</button>
+      ${up ? '' : '<button class="link" data-act="reset-pw">Forgot password?</button>'}
+    </div>
+  </div>`;
+}
+function authError(err) {
+  const code = (err && err.code) || '';
+  const map = {
+    'auth/invalid-email': 'That email address doesn\'t look right.',
+    'auth/missing-password': 'Enter your password.',
+    'auth/weak-password': 'Use a password with at least 6 characters.',
+    'auth/email-already-in-use': 'That email already has an account. Sign in instead.',
+    'auth/invalid-credential': 'Email or password is incorrect.',
+    'auth/wrong-password': 'Email or password is incorrect.',
+    'auth/user-not-found': 'No account with that email. Create one instead.',
+    'auth/too-many-requests': 'Too many tries. Wait a minute and try again.',
+    'auth/popup-blocked': 'Your browser blocked the Google window. Allow pop-ups, or use email.',
+    'auth/popup-closed-by-user': '',
+    'auth/cancelled-popup-request': '',
+    'auth/unauthorized-domain': 'This website isn\'t on Firebase\'s approved list yet. Add it under Authentication, Settings, Authorized domains.',
+    'auth/operation-not-allowed': 'That sign-in method isn\'t turned on in Firebase yet.',
+    'auth/network-request-failed': 'Couldn\'t connect. Check your internet.',
+  };
+  return code in map ? map[code] : 'Something went wrong signing in. Try again.';
+}
+
+/* ---------- Join from an invite link ---------- */
+function viewJoin() {
+  const j = UI.join;
+  if (!j || j.loading) return `<div class="empty-card">Opening invite…</div>`;
+  if (!j.lg) {
+    return `<div class="page-head"><button class="link" data-act="home">Back</button><h1>Invite</h1></div>
+      <div class="empty-card">This invite link doesn't work anymore. The league may have been deleted. Ask your friend for a new link.</div>`;
+  }
+  const lg = j.lg;
+  const owner = lg.teams.find(t => t.ownerUid === lg.commissioner);
+  const openSpots = lg.teams.filter(t => !t.ownerUid).length;
+  const late = lg.phase !== 'lobby';
+  return `
+  <div class="page-head"><button class="link" data-act="home">Cancel</button><h1>Join league</h1></div>
+  <div class="card">
+    <h3 class="card-h">${esc(lg.name)}</h3>
+    <p class="muted">${owner ? `${esc(owner.ownerName || owner.name)} invited you. ` : ''}${esc(confsLabel(lg.conferences))}, ${lg.size} teams, ${SCORING_LABEL[lg.scoring]}${usesReal(lg) ? ', real stats' : ''}.</p>
+    <p class="muted small">${lg.draftType === 'turns' ? 'Take-turns draft: pick whenever it\'s your turn.' : `Live draft with a ${lg.pickSeconds}-second pick timer.`}</p>
+    ${openSpots === 0 ? `<div class="banner bad">This league is full.</div>` : `
+      ${late ? `<div class="banner info"><span>This league already drafted. You'll take over a CPU team, including its players and record.</span></div>` : ''}
+      <label class="field"><span>Your team name</span>
+        <input id="j-team" class="input" data-jfield="teamName" maxlength="30" value="${esc(j.teamName)}"></label>
+      ${j.error ? `<div class="banner bad">${esc(j.error)}</div>` : ''}
+      <button class="btn btn-gold btn-lg btn-block" data-act="join" ${j.busy ? 'disabled' : ''}>Join league</button>`}
+  </div>`;
 }
 
 /* ---------- Create league ---------- */
@@ -177,6 +284,25 @@ function viewCreate() {
 
   return `
   <div class="page-head"><button class="link" data-act="home">Cancel</button><h1>New league</h1></div>
+
+  ${Store.mode === 'cloud' ? `<div class="card">
+    <h3 class="card-h">Who's playing?</h3>
+    <div class="chips">
+      <button class="chip ${!c.multi ? 'on' : ''}" data-act="multi" data-id="0">Just me vs CPU</button>
+      <button class="chip ${c.multi ? 'on' : ''}" data-act="multi" data-id="1">With friends</button>
+    </div>
+    ${c.multi ? `<p class="muted small">You'll get an invite link. Open spots become CPU teams when you start the draft.</p>
+    <h3 class="card-h">Draft style</h3>
+    <div class="chips">
+      <button class="chip ${c.draftType === 'live' ? 'on' : ''}" data-act="dtype" data-id="live">Live draft</button>
+      <button class="chip ${c.draftType === 'turns' ? 'on' : ''}" data-act="dtype" data-id="turns">Take turns</button>
+    </div>
+    <p class="muted small">${c.draftType === 'live'
+      ? 'Everyone drafts at the same time. If the timer runs out, the best player is picked for you.'
+      : 'No timer. Each person picks whenever it\'s their turn, even days apart.'}</p>
+    ${c.draftType === 'live' ? `<h3 class="card-h">Time per pick</h3>
+    <div class="chips">${[30, 60, 90, 120].map(s => `<button class="chip ${c.pickSeconds === s ? 'on' : ''}" data-act="ptime" data-id="${s}">${s < 120 ? s + ' sec' : '2 min'}</button>`).join('')}</div>` : ''}` : ''}
+  </div>` : ''}
 
   <div class="card form">
     <label class="field"><span>League name</span>
@@ -227,9 +353,12 @@ function viewCreate() {
 
 /* ---------- League shell ---------- */
 function viewLeague(lg) {
+  if (lg.phase === 'lobby' && !['lobby', 'league'].includes(UI.tab)) UI.tab = 'lobby';
+  if (lg.phase !== 'lobby' && UI.tab === 'lobby') UI.tab = 'draft';
   if (lg.phase === 'draft' && !['draft', 'league'].includes(UI.tab)) UI.tab = 'draft';
-  if (lg.phase !== 'draft' && UI.tab === 'draft') UI.tab = 'team';
+  if (lg.phase !== 'draft' && lg.phase !== 'lobby' && UI.tab === 'draft') UI.tab = 'team';
   switch (UI.tab) {
+    case 'lobby': return viewLobby(lg);
     case 'draft': return viewDraft(lg);
     case 'matchup': return viewMatchup(lg);
     case 'players': return viewPlayers(lg);
@@ -237,6 +366,35 @@ function viewLeague(lg) {
     case 'league': return viewLeagueInfo(lg);
     default: return viewTeam(lg);
   }
+}
+
+/* ---------- Lobby (friends league before the draft) ---------- */
+function inviteLink(lg) { return `${location.origin}${location.pathname}#join=${lg.id}`; }
+function inviteCard(lg) {
+  const open = lg.teams.filter(t => !t.ownerUid).length;
+  if (!lg.multi || open === 0) return '';
+  return `<div class="card invite">
+    <h3 class="card-h">Invite friends</h3>
+    <p class="muted small">${lg.phase === 'lobby' ? `${open} open spot${open === 1 ? '' : 's'}. Send this link to friends.` : 'Friends who join now take over a CPU team.'}</p>
+    <div class="invite-row"><input id="invite-link" class="input" readonly value="${esc(inviteLink(lg))}">
+      <button class="btn btn-primary" data-act="copy-invite">${navigator.share ? 'Share' : 'Copy'}</button></div>
+  </div>`;
+}
+function viewLobby(lg) {
+  const rows = lg.teams.map(t => `<div class="mgr">
+      <span>${t.ownerUid ? esc(t.name) : '<span class="muted">Open spot</span>'}</span>
+      <span class="muted small">${t.ownerUid ? esc(t.ownerName || '') + (t.ownerUid === lg.commissioner ? ' (commissioner)' : '') + (isMe(t) ? ', you' : '') : 'Becomes a CPU team'}</span>
+    </div>`).join('');
+  const people = humanCount(lg);
+  return `
+  <section class="team-head"><div><div class="th-name">Draft lobby</div>
+    <div class="th-sub">${people} of ${lg.size} spots filled. ${lg.draftType === 'turns' ? 'Take-turns draft' : `Live draft, ${lg.pickSeconds} seconds per pick`}.</div></div></section>
+  ${inviteCard(lg)}
+  <div class="card flush"><div class="list-h">Teams</div>${rows}</div>
+  ${isCommish(lg)
+    ? `<button class="btn btn-gold btn-lg btn-block" data-act="start-draft">Start the draft</button>
+       <p class="muted small center">Draft order is random. Make sure everyone has joined first.</p>`
+    : `<div class="banner info"><span>Waiting for the commissioner to start the draft.${lg.draftType === 'live' ? ' Keep this page open so you don\'t miss your picks.' : ''}</span></div>`}`;
 }
 
 /* ---------- Shared player pieces ---------- */
@@ -288,17 +446,27 @@ function viewDraft(lg) {
   const lastP = last && PMAP.get(last.pid);
   const lastInfo = last && pickInfo(lg.picks.length - 1, lg.size);
 
+  const solo = !lg.multi;
+  const onTeam = lg.teams[ti];
+  const myTeam = lg.teams[me];
+  const who = mine ? "You're on the clock"
+    : isHuman(onTeam) ? `${esc(onTeam.ownerName || onTeam.name)} is picking` : `${esc(onTeam.name)} is picking`;
   const clock = `<section class="clock ${mine ? 'mine' : ''}">
     <div class="clock-top"><span>Round ${info.round} of ${DRAFT_ROUNDS}</span><span>Pick ${info.overall} of ${totalPicks(lg)}</span></div>
-    <div class="clock-team">${mine ? "You're on the clock" : esc(lg.teams[ti].name) + ' is picking'}</div>
-    <div class="clock-sub">${mine ? 'Choose a player below.' : until > 0 ? `Your next pick is in ${until}.` : ''}</div>
+    <div class="clock-team">${who}</div>
+    <div class="clock-sub">${mine ? 'Choose a player below.' : until > 0 ? `Your next pick is in ${until}.` : ''}
+      ${lg.pickSeconds ? `<span class="pick-timer" id="pick-timer"></span>` : ''}</div>
     <div class="clock-actions">
-      ${mine
-        ? `<button class="btn btn-gold" data-act="autopick">Auto-pick for me</button>`
-        : `<button class="btn btn-ghost-light" data-act="sim">Skip to my pick</button>
-           <button class="btn btn-ghost-light" data-act="pause">${UI.paused ? 'Resume' : 'Pause'}</button>`}
-      <button class="btn btn-ghost-light" data-act="autodraft">Auto-draft the rest</button>
+      ${solo
+        ? (mine
+          ? `<button class="btn btn-gold" data-act="autopick">Auto-pick for me</button>`
+          : `<button class="btn btn-ghost-light" data-act="sim">Skip to my pick</button>
+             <button class="btn btn-ghost-light" data-act="pause">${UI.paused ? 'Resume' : 'Pause'}</button>`)
+          + `<button class="btn btn-ghost-light" data-act="autodraft">Auto-draft the rest</button>`
+        : (mine ? `<button class="btn btn-gold" data-act="autopick">Auto-pick for me</button>` : '')
+          + (myTeam ? `<button class="btn btn-ghost-light" data-act="toggle-auto">Auto-draft for me: ${myTeam.autoDraft ? 'On' : 'Off'}</button>` : '')}
     </div>
+    ${!solo && myTeam && myTeam.autoDraft ? `<div class="clock-last">Auto-draft is on. Your picks are made for you, even when you're away.</div>` : ''}
     ${lastP ? `<div class="clock-last">Last pick, R${lastInfo.round} P${lastInfo.pick}: <b>${esc(lg.teams[last.ti].name)}</b> took ${esc(lastP.name)} (${posLabel(lastP.pos)}, ${esc(lastP.team)})</div>` : ''}
   </section>`;
 
@@ -326,7 +494,7 @@ function draftList(lg) {
   </div>`).join('') + (all.length > 150 ? `<p class="muted small center">Showing the top 150. Search or filter to find others.</p>` : '');
 }
 function draftBoard(lg) {
-  const cols = lg.teams.map(t => `<th class="${t.isUser ? 'me' : ''}">${esc(t.name)}</th>`).join('');
+  const cols = lg.teams.map(t => `<th class="${isMe(t) ? 'me' : ''}">${esc(t.name)}</th>`).join('');
   const cur = lg.picks.length;
   let rows = '';
   for (let r = 0; r < DRAFT_ROUNDS; r++) {
@@ -466,7 +634,7 @@ function viewTeam(lg) {
       <div class="th-sub">${record(t)}, ${ordinal(rank)} place, ${fmt(t.pf)} pts for</div></div>
     ${done ? '' : `<div class="th-proj"><b>${fmt(projTotal)}</b><small>${weekLabel(w)} proj</small></div>`}
   </section>
-  ${done ? `<div class="banner gold">${lg.teams[lg.champion].isUser ? 'You won the championship.' : `${esc(lg.teams[lg.champion].name)} won the championship.`} Numbers below are season totals.</div>` : ''}
+  ${done ? `<div class="banner gold">${isMe(lg.teams[lg.champion]) ? 'You won the championship.' : `${esc(lg.teams[lg.champion].name)} won the championship.`} Numbers below are season totals.</div>` : ''}
   ${banner}
   <div class="card flush">
     <div class="list-h"><span>Starters</span>${!done && !mv ? `<button class="link" data-act="autoset">Auto-set lineup</button>` : ''}</div>
@@ -515,7 +683,7 @@ function viewMatchup(lg) {
   let top = '';
   if (lg.phase === 'done' && w === FINAL_WEEK) {
     const champ = lg.teams[lg.champion];
-    top = `<div class="banner gold">${champ.isUser ? 'You are the league champion.' : `${esc(champ.name)} won the championship.`}</div>`;
+    top = `<div class="banner gold">${isMe(champ) ? 'You are the league champion.' : `${esc(champ.name)} won the championship.`}</div>`;
   } else if (!inWeek && w > REG_WEEKS) {
     top = `<div class="banner info"><span>Your season is over. You can still watch the playoffs.</span></div>`;
   }
@@ -591,7 +759,7 @@ function faList(lg) {
 /* ---------- Standings ---------- */
 function viewStandings(lg) {
   const st = standings(lg);
-  const rows = st.map((t, i) => `<tr class="${t.isUser ? 'me' : ''} ${i === PLAYOFF_TEAMS - 1 ? 'cut' : ''}">
+  const rows = st.map((t, i) => `<tr class="${isMe(t) ? 'me' : ''} ${i === PLAYOFF_TEAMS - 1 ? 'cut' : ''}">
     <td class="num">${i + 1}</td><td class="tname">${esc(t.name)}</td><td class="num">${record(t)}</td>
     <td class="num">${fmt(t.pf)}</td><td class="num">${fmt(t.pa)}</td></tr>`).join('');
   let bracket = '';
@@ -634,7 +802,8 @@ function viewLeagueInfo(lg) {
       <dt>Teams</dt><dd>${lg.size}</dd>
       <dt>Scoring</dt><dd>${SCORING_LABEL[lg.scoring]}</dd>
       <dt>Points from</dt><dd>${usesReal(lg) ? 'Real games' : 'Simulated'}</dd>
-      <dt>Your draft slot</dt><dd>${ordinal(me + 1)}</dd>
+      ${lg.phase !== 'lobby' && me >= 0 ? `<dt>Your draft slot</dt><dd>${ordinal(me + 1)}</dd>` : ''}
+      ${lg.multi ? `<dt>Draft</dt><dd>${lg.draftType === 'turns' ? 'Take turns' : `Live, ${lg.pickSeconds} sec per pick`}</dd>` : ''}
       <dt>Season</dt><dd>${REG_WEEKS} weeks, ${PLAYOFF_TEAMS}-team playoff</dd>
     </dl>
     <div class="conf-pills">${lg.conferences.map(id => {
@@ -643,12 +812,16 @@ function viewLeagueInfo(lg) {
     }).join('')}</div>
   </div>
   <h2 class="sec-title">Managers</h2>
-  <div class="card flush">${lg.teams.map(t => `<div class="mgr"><span>${esc(t.name)}</span><span class="muted small">${t.isUser ? 'You' : 'CPU'}</span></div>`).join('')}</div>
+  <div class="card flush">${lg.teams.map(t => `<div class="mgr"><span>${t.open ? '<span class="muted">Open spot</span>' : esc(t.name)}</span><span class="muted small">${
+    isMe(t) ? 'You' : t.ownerUid ? esc(t.ownerName || 'Friend') : t.open ? '' : 'CPU'}${t.ownerUid && t.ownerUid === lg.commissioner ? ' (commissioner)' : ''}</span></div>`).join('')}</div>
+  ${lg.phase !== 'lobby' ? inviteCard(lg) : ''}
   ${myPicks.length ? `<h2 class="sec-title">Your draft picks</h2><div class="card flush">${myPicks.map(({ pk, n }) => {
     const p = PMAP.get(pk.pid), inf = pickInfo(n, lg.size);
     return `<div class="prow"><div class="rank">R${inf.round}</div>${pmain(p)}<div class="pnum"><b>${inf.overall}</b><small>overall</small></div></div>`;
   }).join('')}</div>` : ''}
-  <button class="btn btn-danger btn-block" data-act="delete">Delete league</button>`;
+  ${isCommish(lg)
+    ? `<button class="btn btn-danger btn-block" data-act="delete">Delete league</button>`
+    : `<button class="btn btn-danger btn-block" data-act="leave">Leave league</button>`}`;
 }
 
 /* ---------- Modals ---------- */
@@ -658,8 +831,11 @@ function viewModal(lg) {
   if (m.type === 'player' && lg) inner = playerModal(lg, PMAP.get(m.id));
   else if (m.type === 'drop' && lg) inner = dropModal(lg, PMAP.get(m.id));
   else if (m.type === 'delete') {
-    inner = `<h3 class="m-h">Delete this league?</h3><p class="muted">This removes the league and all of its results from this device.</p>
+    inner = `<h3 class="m-h">Delete this league?</h3><p class="muted">This removes the league and all of its results${lg && lg.multi ? ' for everyone in it' : ''}.</p>
       <div class="m-actions"><button class="btn" data-act="close-modal">Keep league</button><button class="btn btn-danger" data-act="confirm-delete">Delete league</button></div>`;
+  } else if (m.type === 'leave') {
+    inner = `<h3 class="m-h">Leave this league?</h3><p class="muted">A CPU manager takes over your team. You can rejoin later with an invite link if a spot is open.</p>
+      <div class="m-actions"><button class="btn" data-act="close-modal">Stay</button><button class="btn btn-danger" data-act="confirm-leave">Leave league</button></div>`;
   }
   return `<div class="backdrop" data-act="close-modal"><div class="modal" role="dialog" aria-modal="true" data-act="noop">
     <button class="m-close" data-act="close-modal" aria-label="Close">×</button>${inner}</div></div>`;
@@ -709,21 +885,65 @@ function dropModal(lg, add) {
 /* =========================================================
    CPU draft pacing
    ========================================================= */
-function scheduleCpu(lg) {
-  if (!lg || UI.view !== 'league' || lg.phase !== 'draft' || UI.tab !== 'draft' || UI.paused || UI.modal) return;
+/* Draft automation. Every quarter second, the open league checks whether
+   a pick is due: a CPU team, a team with auto-draft on, or a live-draft
+   timer that ran out. Every friend's browser runs this, but each pick is
+   saved only if the draft hasn't moved on, so it never picks twice. */
+const CPU_DELAY_SOLO = 450;
+const CPU_DELAY_MULTI = 1500;
+let draftWorking = false;
+
+function draftDueIn(lg) {
+  if (!lg || lg.phase !== 'draft') return null;
   const ti = onClock(lg);
-  if (ti < 0 || lg.teams[ti].isUser) return;
-  draftTimer = setTimeout(() => {
-    makePick(lg, cpuChoice(lg, ti));
-    afterPick(lg);
-  }, 450);
+  if (ti < 0) return null;
+  const t = lg.teams[ti];
+  const elapsed = Date.now() - (lg.pickStartedAt || 0);
+  if (!isHuman(t) || t.autoDraft) return (lg.multi ? CPU_DELAY_MULTI : CPU_DELAY_SOLO) - elapsed;
+  if (lg.pickSeconds) return lg.pickSeconds * 1000 - elapsed;
+  return null; // take-turns draft: wait for the person
 }
-function afterPick(lg) {
-  save();
-  if (lg.phase !== 'draft') {
+
+function draftTick() {
+  const lg = activeLeague();
+  if (!lg || UI.view !== 'league' || lg.phase !== 'draft' || draftWorking || busy) return;
+  if (!lg.multi && (UI.paused || UI.modal || UI.tab !== 'draft')) return;
+  const due = draftDueIn(lg);
+  if (due === null || due > 0) return;
+  const n = lg.picks.length;
+  draftWorking = true;
+  const wasMine = onClock(lg) === userIdx(lg);
+  Store.update(lg.id, fresh => {
+    if (fresh.phase !== 'draft' || fresh.picks.length !== n) return false;
+    const fdue = draftDueIn(fresh);
+    if (fdue === null || fdue > 0) return false;
+    return makePick(fresh, cpuChoice(fresh, onClock(fresh)));
+  }).then(ok => {
+    draftWorking = false;
+    if (ok && wasMine && lg.multi) toast('Time ran out, so the best available player was picked for you.');
+    afterPick();
+  }).catch(err => { draftWorking = false; console.error(err); });
+}
+
+function updateClock() {
+  const el = document.getElementById('pick-timer');
+  const lg = activeLeague();
+  if (!el || !lg || lg.phase !== 'draft' || !lg.pickSeconds) return;
+  const t = lg.teams[onClock(lg)];
+  if (!t || !isHuman(t) || t.autoDraft) { el.textContent = ''; return; }
+  const left = Math.max(0, Math.ceil((lg.pickSeconds * 1000 - (Date.now() - lg.pickStartedAt)) / 1000));
+  el.textContent = ` ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')} left`;
+  el.classList.toggle('low', left <= 10);
+}
+
+let lastPhase = {};
+function afterPick() {
+  const lg = activeLeague();
+  if (lg && lastPhase[lg.id] === 'draft' && lg.phase !== 'draft' && UI.tab === 'draft') {
     UI.tab = 'team';
     toast('Draft complete. Your lineup is set for Week 1.');
   }
+  if (lg) lastPhase[lg.id] = lg.phase;
   render();
 }
 
@@ -732,15 +952,53 @@ function afterPick(lg) {
    ========================================================= */
 const actions = {
   noop() {},
-  home() { UI.view = 'home'; UI.modal = null; UI.move = null; DB.activeId = null; save(); render(); window.scrollTo(0, 0); },
-  new() { UI.create = newCreateState(); UI.view = 'create'; render(); window.scrollTo(0, 0); },
-  open(id) {
-    DB.activeId = id; save();
-    const lg = activeLeague();
-    UI.view = 'league'; UI.tab = lg.phase === 'draft' ? 'draft' : 'team';
-    UI.week = null; UI.game = null; UI.move = null; UI.paused = false; resetFilters();
+  home() {
+    UI.view = 'home'; UI.modal = null; UI.move = null; UI.leagueId = null; UI.join = null;
     render(); window.scrollTo(0, 0);
   },
+  new() { UI.create = newCreateState(); UI.view = 'create'; render(); window.scrollTo(0, 0); },
+  open(id) {
+    const lg = Store.get(id);
+    if (!lg) return;
+    UI.leagueId = id;
+    UI.view = 'league';
+    UI.tab = lg.phase === 'lobby' ? 'lobby' : lg.phase === 'draft' ? 'draft' : 'team';
+    UI.week = null; UI.game = null; UI.move = null; UI.paused = false; resetFilters();
+    lastPhase[id] = lg.phase;
+    render(); window.scrollTo(0, 0);
+  },
+
+  /* ----- Sign in ----- */
+  google() {
+    UI.auth.error = ''; UI.auth.busy = true; render();
+    Store.signInGoogle().catch(err => { UI.auth.error = authError(err); })
+      .finally(() => { UI.auth.busy = false; render(); });
+  },
+  'email-auth'() {
+    const s = UI.auth;
+    s.error = ''; s.busy = true; render();
+    const p = s.mode === 'signup' ? Store.signUpEmail(s.email.trim(), s.pw) : Store.signInEmail(s.email.trim(), s.pw);
+    p.then(() => { s.pw = ''; }).catch(err => { s.error = authError(err); })
+      .finally(() => { s.busy = false; render(); });
+  },
+  'auth-mode'() { UI.auth.mode = UI.auth.mode === 'signup' ? 'signin' : 'signup'; UI.auth.error = ''; render(); },
+  'reset-pw'() {
+    const email = UI.auth.email.trim();
+    if (!email) { UI.auth.error = 'Type your email above first, then tap Forgot password.'; render(); return; }
+    Store.resetPassword(email)
+      .then(() => toast('Check your email for a link to reset your password.'))
+      .catch(err => { UI.auth.error = authError(err); render(); });
+  },
+  signout() { UI.leagueId = null; UI.view = 'home'; Store.signOut(); },
+  import() {
+    Store.importDeviceLeagues().then(n => toast(`Added ${n} league${n === 1 ? '' : 's'} to your account.`))
+      .catch(err => { console.error(err); toast("Couldn't move those leagues. Try again."); });
+  },
+
+  /* ----- Create ----- */
+  multi(id) { UI.create.multi = id === '1'; render(); },
+  dtype(id) { UI.create.draftType = id; render(); },
+  ptime(id) { UI.create.pickSeconds = +id; render(); },
   'toggle-conf'(id) {
     const c = UI.create;
     c.confs.has(id) ? c.confs.delete(id) : c.confs.add(id);
@@ -764,126 +1022,233 @@ const actions = {
     const lg = createLeague({
       name: c.name.trim() || 'Saturday League', teamName: c.teamName.trim() || 'My Team',
       size: c.size, scoring: c.scoring, conferences: ids, pointsFrom: c.pointsFrom,
+      ownerUid: ME_UID, ownerName: Store.displayName(),
+      multi: Store.mode === 'cloud' && c.multi, draftType: c.draftType, pickSeconds: c.pickSeconds,
     });
-    DB.leagues.unshift(lg); DB.activeId = lg.id; save();
-    UI.view = 'league'; UI.tab = 'draft'; UI.dtab = 'players'; UI.paused = false; resetFilters();
-    render(); window.scrollTo(0, 0);
+    if (busy) return;
+    busy = true;
+    Store.create(lg).then(() => {
+      busy = false;
+      UI.leagueId = lg.id;
+      UI.view = 'league'; UI.tab = lg.phase === 'lobby' ? 'lobby' : 'draft'; UI.dtab = 'players'; UI.paused = false; resetFilters();
+      render(); window.scrollTo(0, 0);
+    }).catch(err => { busy = false; console.error(err); toast("Couldn't create the league. Check your connection."); });
   },
+
+  /* ----- Friends ----- */
+  'copy-invite'() {
+    const lg = activeLeague();
+    const link = inviteLink(lg);
+    if (navigator.share) {
+      navigator.share({ title: lg.name, text: `Join my college fantasy football league, ${lg.name}!`, url: link }).catch(() => {});
+      return;
+    }
+    const done = () => toast('Invite link copied. Paste it to your friends.');
+    if (navigator.clipboard) navigator.clipboard.writeText(link).then(done, () => selectInvite());
+    else selectInvite();
+  },
+  join() {
+    const j = UI.join;
+    if (!j || !j.lg || j.busy) return;
+    j.busy = true; j.error = ''; render();
+    const name = (j.teamName || '').trim() || Store.displayName() + "'s Team";
+    Store.update(j.id, lg => joinLeague(lg, ME_UID, Store.displayName(), name) === 'joined')
+      .then(ok => {
+        j.busy = false;
+        const lg = Store.get(j.id);
+        if (!ok && !(lg && userIdx(lg) >= 0)) { j.error = 'That league filled up before you joined.'; render(); return; }
+        toast(`You joined ${j.lg.name}!`);
+        UI.join = null;
+        waitForLeague(j.id);
+      })
+      .catch(err => { console.error(err); j.busy = false; j.error = "Couldn't join. Check your connection and try again."; render(); });
+  },
+  'start-draft'() { mutate(lg => isCommish(lg) && startDraft(lg), 'The draft has started!').then(() => { UI.tab = 'draft'; render(); }); },
+  'toggle-auto'() {
+    mutate(lg => { const t = lg.teams[userIdx(lg)]; if (!t) return false; t.autoDraft = !t.autoDraft; });
+  },
+  leave() { UI.modal = { type: 'leave' }; render(); },
+  'confirm-leave'() {
+    const id = UI.leagueId;
+    UI.modal = null; UI.leagueId = null; UI.view = 'home';
+    Store.update(id, lg => { if (isCommish(lg)) return false; leaveLeague(lg, ME_UID); })
+      .then(() => toast('You left the league. A CPU manager took over your team.'))
+      .catch(() => toast("Couldn't leave the league. Try again."));
+    render();
+  },
+
+  /* ----- Draft ----- */
   tab(id) { UI.tab = id; UI.move = null; UI.week = null; UI.game = null; UI.f.q = ''; render(); window.scrollTo(0, 0); },
   dtab(id) { UI.dtab = id; render(); },
   fpos(id) { UI.f.pos = id; render(); },
   draft(id) {
-    const lg = activeLeague();
-    if (onClock(lg) !== userIdx(lg)) return;
     const p = PMAP.get(id);
-    if (makePick(lg, id)) { UI.modal = null; toast(`You drafted ${p.name}.`); afterPick(lg); }
+    UI.modal = null;
+    mutate(lg => onClock(lg) === userIdx(lg) && makePick(lg, id), `You drafted ${p.name}.`).then(afterPick);
   },
   autopick() {
-    const lg = activeLeague();
-    const me = userIdx(lg);
-    if (onClock(lg) !== me) return;
-    const pid = cpuChoice(lg, me);
-    if (makePick(lg, pid)) { toast(`Auto-picked ${PMAP.get(pid).name}.`); afterPick(lg); }
+    mutate(lg => {
+      const me = userIdx(lg);
+      return onClock(lg) === me && makePick(lg, cpuChoice(lg, me));
+    }, 'Picked the best available player for you.').then(afterPick);
   },
   sim() {
-    const lg = activeLeague();
-    const me = userIdx(lg);
-    while (lg.phase === 'draft' && onClock(lg) !== me) makePick(lg, cpuChoice(lg, onClock(lg)));
-    UI.paused = false; afterPick(lg);
+    UI.paused = false;
+    mutate(lg => {
+      if (lg.multi) return false;
+      const me = userIdx(lg);
+      let n = 0;
+      while (lg.phase === 'draft' && onClock(lg) !== me) { makePick(lg, cpuChoice(lg, onClock(lg))); n++; }
+      return n > 0;
+    }).then(afterPick);
   },
   pause() { UI.paused = !UI.paused; render(); },
   autodraft() {
-    const lg = activeLeague();
-    while (lg.phase === 'draft') {
-      if (!makePick(lg, cpuChoice(lg, onClock(lg)))) break;
-    }
-    afterPick(lg);
+    mutate(lg => {
+      if (lg.multi) return false;
+      while (lg.phase === 'draft') { if (!makePick(lg, cpuChoice(lg, onClock(lg)))) break; }
+    }).then(afterPick);
   },
+
+  /* ----- Team ----- */
   player(id) { UI.modal = { type: 'player', id }; render(); },
   'close-modal'() { UI.modal = null; render(); },
   move(id) { UI.move = id; render(); },
   'move-cancel'() { UI.move = null; render(); },
   'move-to'(id) {
-    const lg = activeLeague();
-    doMove(lg.teams[userIdx(lg)], UI.move, id);
-    UI.move = null; save(); render();
+    const mv = UI.move;
+    UI.move = null;
+    mutate(lg => { const t = lg.teams[userIdx(lg)]; if (!t) return false; doMove(t, mv, id); });
   },
   autoset() {
-    const lg = activeLeague();
-    autoLineup(lg, lg.teams[userIdx(lg)], lg.week);
-    UI.move = null; save(); toast('Lineup set to your best projected starters.'); render();
+    UI.move = null;
+    mutate(lg => { const t = lg.teams[userIdx(lg)]; if (!t) return false; autoLineup(lg, t, lg.week); },
+      'Lineup set to your best projected starters.');
   },
-  play() {
-    const lg = activeLeague();
-    const w = lg.week;
-    const res = playWeek(lg);
-    if (!res) { toast(`${weekLabel(w)} unlocks after the real games are finished.`); render(); return; }
-    save();
-    UI.week = w; UI.game = null;
-    const me = userIdx(lg);
-    const g = res && res.find(x => x.a === me || x.b === me);
-    if (g) {
-      const mine = g.a === me ? g.as : g.bs, theirs = g.a === me ? g.bs : g.as;
-      toast(`${weekLabel(w)}: you ${g.winner === me ? 'won' : g.winner == null ? 'tied' : 'lost'} ${fmt(mine)} to ${fmt(theirs)}.`);
-    } else toast(`${weekLabel(w)} is in the books.`);
-    render(); window.scrollTo(0, 0);
-  },
-  catchup() {
-    const lg = activeLeague();
-    let n = 0, last = lg.week;
-    while (lg.phase !== 'done' && weekReady(lg, lg.week)) {
-      last = lg.week;
-      if (!playWeek(lg)) break;
-      n++;
-    }
-    save();
-    UI.week = last; UI.game = null;
-    const me = lg.teams[userIdx(lg)];
-    toast(`Scored ${n} week${n === 1 ? '' : 's'}. You're ${record(me)}.`);
-    render(); window.scrollTo(0, 0);
-  },
-  week(id) { UI.week = +id; UI.game = null; render(); },
-  game(id) { UI.game = +id; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); },
   add(id) {
     const lg = activeLeague();
     const t = lg.teams[userIdx(lg)];
-    if (ownerMap(lg).has(id)) return;
+    if (!t || ownerMap(lg).has(id)) return;
     if (rosterOf(t).length >= ROSTER_MAX) { UI.modal = { type: 'drop', id }; render(); return; }
-    t.bench.push(id); save();
-    UI.modal = null; toast(`Added ${PMAP.get(id).name} to your bench.`); render();
+    UI.modal = null;
+    mutate(fresh => {
+      const ft = fresh.teams[userIdx(fresh)];
+      if (!ft || ownerMap(fresh).has(id) || rosterOf(ft).length >= ROSTER_MAX) return false;
+      ft.bench.push(id);
+    }, `Added ${PMAP.get(id).name} to your bench.`);
   },
   drop(id) {
-    const lg = activeLeague();
-    removeFromRoster(lg.teams[userIdx(lg)], id); save();
-    UI.modal = null; toast(`Dropped ${PMAP.get(id).name}.`); render();
+    UI.modal = null;
+    mutate(lg => { const t = lg.teams[userIdx(lg)]; if (!t || !rosterOf(t).includes(id)) return false; removeFromRoster(t, id); },
+      `Dropped ${PMAP.get(id).name}.`);
   },
   swapdrop(id) {
-    const lg = activeLeague();
-    const t = lg.teams[userIdx(lg)];
     const add = UI.modal.id;
-    // New player takes the dropped player's spot if eligible, else the bench.
-    const si = t.starters.findIndex(s => s.pid === id);
-    removeFromRoster(t, id);
-    if (si >= 0 && ELIG[t.starters[si].slot].includes(PMAP.get(add).pos)) t.starters[si].pid = add;
-    else t.bench.push(add);
-    save(); UI.modal = null;
-    toast(`Added ${PMAP.get(add).name}, dropped ${PMAP.get(id).name}.`); render();
+    UI.modal = null;
+    mutate(lg => {
+      const t = lg.teams[userIdx(lg)];
+      if (!t || ownerMap(lg).has(add) || !rosterOf(t).includes(id)) return false;
+      // New player takes the dropped player's spot if eligible, else the bench.
+      const si = t.starters.findIndex(s => s.pid === id);
+      removeFromRoster(t, id);
+      if (si >= 0 && ELIG[t.starters[si].slot].includes(PMAP.get(add).pos)) t.starters[si].pid = add;
+      else t.bench.push(add);
+    }, `Added ${PMAP.get(add).name}, dropped ${PMAP.get(id).name}.`);
   },
+
+  /* ----- Season ----- */
+  play() {
+    const w = activeLeague().week;
+    let result = null;
+    mutate(lg => {
+      if (lg.week !== w) return false;
+      result = playWeek(lg);
+      return !!result;
+    }).then(ok => {
+      UI.week = w; UI.game = null;
+      if (!ok) { toast(`${weekLabel(w)} unlocks after the real games are finished.`); render(); return; }
+      const lg = activeLeague();
+      const me = userIdx(lg);
+      const g = result && result.find(x => x.a === me || x.b === me);
+      if (g) {
+        const mine = g.a === me ? g.as : g.bs, theirs = g.a === me ? g.bs : g.as;
+        toast(`${weekLabel(w)}: you ${g.winner === me ? 'won' : g.winner == null ? 'tied' : 'lost'} ${fmt(mine)} to ${fmt(theirs)}.`);
+      } else toast(`${weekLabel(w)} is in the books.`);
+      render(); window.scrollTo(0, 0);
+    });
+  },
+  catchup() {
+    let n = 0, last = activeLeague().week;
+    mutate(lg => {
+      n = 0;
+      while (lg.phase !== 'done' && weekReady(lg, lg.week)) {
+        last = lg.week;
+        if (!playWeek(lg)) break;
+        n++;
+      }
+      return n > 0;
+    }).then(() => {
+      UI.week = last; UI.game = null;
+      const lg = activeLeague();
+      const me = lg && lg.teams[userIdx(lg)];
+      toast(`Scored ${n} week${n === 1 ? '' : 's'}.${me ? ` You're ${record(me)}.` : ''}`);
+      render(); window.scrollTo(0, 0);
+    });
+  },
+  week(id) { UI.week = +id; UI.game = null; render(); },
+  game(id) { UI.game = +id; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); },
+
+  /* ----- League ----- */
   delete() { UI.modal = { type: 'delete' }; render(); },
   'confirm-delete'() {
-    const id = DB.activeId;
-    DB.leagues = DB.leagues.filter(l => l.id !== id);
+    const id = UI.leagueId;
+    UI.modal = null; UI.leagueId = null; UI.view = 'home';
     POOL_CACHE.delete(id); RANK_CACHE.delete(id);
-    DB.activeId = null; UI.modal = null; UI.view = 'home'; save();
-    toast('League deleted.'); render();
+    Store.remove(id).then(() => toast('League deleted.')).catch(() => toast("Couldn't delete the league. Try again."));
+    render();
   },
 };
+function selectInvite() {
+  const el = document.getElementById('invite-link');
+  if (el) { el.focus(); el.select(); toast('Press Ctrl+C to copy the link.'); }
+}
 function fixSize() {
   const c = UI.create;
   const ids = [...c.confs];
   if (sizeAllowed(ids, c.size)) return;
   const ok = LEAGUE_SIZES.filter(s => sizeAllowed(ids, s));
   if (ok.length) c.size = ok[ok.length - 1];
+}
+/* After joining, the league shows up in "my leagues" a moment later. */
+function waitForLeague(id, tries = 0) {
+  if (Store.get(id)) { actions.open(id); return; }
+  if (tries > 40) { UI.view = 'home'; render(); return; }
+  setTimeout(() => waitForLeague(id, tries + 1), 150);
+}
+
+/* ---------- Invite links (#join=LEAGUEID) ---------- */
+function readInvite() {
+  const m = location.hash.match(/^#join=([A-Za-z0-9]+)/);
+  if (!m) return;
+  UI.join = { id: m[1], lg: null, loading: true, teamName: '', busy: false, error: '' };
+  history.replaceState(null, '', location.pathname + location.search);
+  openInvite();
+}
+function openInvite() {
+  const j = UI.join;
+  if (!j || !Store.authReady) return;
+  if (Store.mode === 'cloud' && !Store.user) { render(); return; } // sign in first
+  if (Store.get(j.id)) { UI.join = null; actions.open(j.id); return; } // already a member
+  UI.view = 'join';
+  j.loading = true; render();
+  Store.fetchOne(j.id).then(lg => {
+    j.loading = false; j.lg = lg;
+    if (lg && !j.teamName) j.teamName = Store.displayName() + "'s Team";
+    render();
+  }).catch(err => {
+    console.error(err);
+    j.loading = false; j.lg = null; render();
+  });
 }
 
 document.addEventListener('click', e => {
@@ -896,7 +1261,10 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('input', e => {
   const el = e.target;
-  if (el.dataset && el.dataset.field && UI.create) { UI.create[el.dataset.field] = el.value; return; }
+  if (!el.dataset) return;
+  if (el.dataset.field && UI.create) { UI.create[el.dataset.field] = el.value; return; }
+  if (el.dataset.afield) { UI.auth[el.dataset.afield] = el.value; return; }
+  if (el.dataset.jfield && UI.join) { UI.join[el.dataset.jfield] = el.value; return; }
   if (el.id === 'q') { UI.f.q = el.value; refreshList(); }
 });
 document.addEventListener('change', e => {
@@ -906,11 +1274,27 @@ document.addEventListener('change', e => {
 });
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && UI.modal) { UI.modal = null; render(); }
+  if (e.key === 'Enter' && e.target && e.target.dataset && e.target.dataset.afield) actions['email-auth']();
 });
+window.addEventListener('hashchange', readInvite);
 
 /* ---------- Boot ---------- */
 (function boot() {
-  const lg = activeLeague();
-  if (lg) { UI.view = 'league'; UI.tab = lg.phase === 'draft' ? 'draft' : 'team'; }
+  let wasSignedIn = null;
+  Store.onChange = () => {
+    const signedIn = !!Store.user;
+    if (UI.join && wasSignedIn !== signedIn) { wasSignedIn = signedIn; openInvite(); return; }
+    wasSignedIn = signedIn;
+    const lg = activeLeague();
+    if (lg) {
+      if (lastPhase[lg.id] === 'lobby' && lg.phase === 'draft' && UI.tab === 'lobby') { UI.tab = 'draft'; toast('The draft has started!'); }
+      if (lastPhase[lg.id] === 'draft' && lg.phase !== 'draft' && UI.tab === 'draft') { UI.tab = 'team'; toast('Draft complete. Your lineup is set for Week 1.'); }
+      lastPhase[lg.id] = lg.phase;
+    }
+    render();
+  };
+  Store.init();
+  readInvite();
   render();
+  setInterval(() => { draftTick(); updateClock(); }, 250);
 })();
