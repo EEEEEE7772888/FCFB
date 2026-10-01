@@ -4,8 +4,9 @@ on:
   push:
     branches: [main]
   schedule:
-    - cron: "0 14 * * *"   # every day at 14:00 UTC (10 AM Eastern)
-  workflow_dispatch:        # adds a "Run workflow" button
+    - cron: "0 14 * * *"     # players and stats: every day at 10 AM Eastern
+    - cron: "30 */2 * * *"   # news: every 2 hours
+  workflow_dispatch:          # adds a "Run workflow" button
 
 permissions:
   contents: write
@@ -32,6 +33,7 @@ jobs:
           python-version: "3.11"
 
       - name: Download players and stats
+        if: github.event_name != 'schedule' || github.event.schedule == '0 14 * * *'
         continue-on-error: true
         env:
           CFBD_API_KEY: ${{ secrets.CFBD_API_KEY }}
@@ -39,12 +41,17 @@ jobs:
           python fetch_players.py
           python fetch_stats.py
 
-      - name: Save the new stats
+      - name: Download news
+        continue-on-error: true
+        run: python fetch_news.py
+
+      - name: Save the new data
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
-          git add -A players.js stats.js || true
-          git diff --staged --quiet || git commit -m "Update players and stats"
+          git add -A players.js stats.js news.js || true
+          git diff --staged --quiet || git commit -m "Update players, stats, and news"
+          git pull --rebase || true
           git push
 
       - name: Set up Pages
