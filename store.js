@@ -106,6 +106,26 @@ const Store = {
     await this.db.collection('leagues').doc(id).delete();
   },
 
+  /* ---------- League chat (friend leagues, cloud only) ----------
+     Messages live in leagues/{id}/messages so the league itself stays small. */
+  listenChat(leagueId, cb) {
+    if (this.mode !== 'cloud') { cb([]); return () => {}; }
+    return this.db.collection('leagues').doc(leagueId).collection('messages')
+      .orderBy('at', 'desc').limit(80)
+      .onSnapshot(snap => {
+        const msgs = [];
+        snap.forEach(d => msgs.push(Object.assign({ id: d.id }, d.data())));
+        cb(msgs.reverse());
+      }, err => { console.error(err); cb(null); });
+  },
+  sendChat(leagueId, text) {
+    const clean = String(text || '').trim().slice(0, 500);
+    if (!clean || this.mode !== 'cloud') return Promise.resolve(false);
+    return this.db.collection('leagues').doc(leagueId).collection('messages').add({
+      uid: ME_UID, name: this.displayName(), text: clean, at: Date.now(),
+    }).then(() => true);
+  },
+
   /* Leagues saved in this browser before accounts existed. */
   deviceLeagues() {
     if (this.mode === 'local') return [];

@@ -85,7 +85,15 @@ function isBye(p, week) {
   if (played) return !played.has(p.team);
   return week <= REG_WEEKS && p.bye === week;
 }
-function weekProj(lg, p, week) { return isBye(p, week) ? 0 : projPts(p, lg.scoring); }
+/* Injury tags set by the commissioner: Q = questionable, D = doubtful, O = out. */
+const INJ_FACTOR = { Q: 0.85, D: 0.3, O: 0 };
+const INJ_LABEL = { Q: 'Questionable', D: 'Doubtful', O: 'Out' };
+function injuryOf(lg, pid) { return (lg && lg.injuries && lg.injuries[pid]) || ''; }
+function weekProj(lg, p, week) {
+  if (isBye(p, week)) return 0;
+  const inj = injuryOf(lg, p.id);
+  return projPts(p, lg.scoring) * (inj ? INJ_FACTOR[inj] : 1);
+}
 
 function computeRepl(pool, size, scoring) {
   const SHARE = { QB: 1, RB: 2.5, WR: 2.5, TE: 1.1, K: 1, DST: 1 };
@@ -224,7 +232,120 @@ function normalizeLeague(lg) {
   if (lg.multi === undefined) lg.multi = false;
   if (!lg.pickStartedAt) lg.pickStartedAt = Date.now();
   if (lg.pickSeconds === undefined) lg.pickSeconds = 0;
+  if (!lg.trades) lg.trades = [];
+  if (!lg.claims) lg.claims = [];
+  if (!lg.injuries) lg.injuries = {};
+  if (lg.waivers === undefined) lg.waivers = !!lg.multi;
+  if (!lg.waiverNext) lg.waiverNext = nextWaiverTime(Date.now());
   return lg;
+}
+
+/* ---------- Trades ---------- */
+// Check that a trade still works: both sides own their players and
+// nobody ends up with too many players.
+function tradeProblem(lg, from, to, give, get) {
+  const A = lg.teams[from], B = lg.teams[to];
+  if (!A || !B || from === to) return 'Pick a team to trade with.';
+  if (!give.length && !get.length) return 'Add at least one player.';
+  const ra = rosterOf(A), rb = rosterOf(B);
+  if (!give.every(pid => ra.includes(pid))) return 'One of your players is no longer on your team.';
+  if (!get.every(pid => rb.includes(pid))) return `One of those players is no longer on ${B.name}.`;
+  if (ra.length - give.length + get.length > ROSTER_MAX) return `You'd have more than ${ROSTER_MAX} players. Add someone to give away.`;
+  if (rb.length - get.length + give.length > ROSTER_MAX) return `${B.name} would have more than ${ROSTER_MAX} players.`;
+  return '';
+}
+function swapPlayers(lg, from, to, give, get) {
+  const A = lg.teams[from], B = lg.teams[to];
+  give.forEach(pid => { removeFromRoster(A, pid); B.bench.push(pid); });
+  get.forEach(pid => { removeFromRoster(B, pid); A.bench.push(pid); });
+  // Any other offers that used these players no longer make sense.
+  const moved = new Set(give.concat(get));
+  for (const t of lg.trades) {
+    if (t.status === 'pending' && t.give.concat(t.get).some(pid => moved.has(pid))) t.status = 'canceled';
+  }
+  lg.claims = lg.claims.filter(c => !(c.drop && moved.has(c.drop)));
+}
+// CPU managers accept if what they get is worth a bit more than what they give.
+function cpuLikesTrade(lg, give, get) {
+  const v = ids => ids.reduce((s, pid) => s + Math.max(0, projPts(PMAP.get(pid), lg.scoring) - lg.repl[PMAP.get(pid).pos] * 0.6), 0);
+  return v(give) >= v(get) * 1.15 + 0.5;
+}
+function proposeTrade(lg, from, to, give, get, nowMs = Date.now()) {
+  const problem = tradeProblem(lg, from, to, give, get);
+  if (problem) return { error: problem };
+  const trade = { id: uid(), from, to, give: give.slice(), get: get.slice(), status: 'pending', at: nowMs };
+  lg.trades.push(trade);
+  if (!isHuman(lg.teams[to])) {
+    trade.status = cpuLikesTrade(lg, give, get) ? 'accepted' : 'declined';
+    trade.doneAt = nowMs;
+    if (trade.status === 'accepted') swapPlayers(lg, from, to, give, get);
+  }
+  if (lg.trades.length > 60) lg.trades = lg.trades.slice(-60);
+  return { trade };
+}
+function answerTrade(lg, tradeId, accept, nowMs = Date.now()) {
+  const t = lg.trades.find(x => x.id === tradeId);
+  if (!t || t.status !== 'pending') return 'That offer is no longer open.';
+  if (accept) {
+    const problem = tradeProblem(lg, t.from, t.to, t.give, t.get);
+    if (problem) { t.status = 'canceled'; t.doneAt = nowMs; return problem; }
+    swapPlayers(lg, t.from, t.to, t.give, t.get);
+  }
+  t.status = accept ? 'accepted' : 'declined';
+  t.doneAt = nowMs;
+  return '';
+}
+
+/* ---------- Waivers ----------
+   In friend leagues, adding a free agent makes a claim. Claims are processed
+   once a day at 08:00 UTC (4 AM Eastern). The team lowest in the standings
+   gets first choice; after a team gets a player it goes to the back. */
+function nextWaiverTime(fromMs) {
+  const d = new Date(fromMs);
+  const next = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 8, 0, 0);
+  return next > fromMs ? next : next + 86400000;
+}
+function waiverOrder(lg) {
+  if (lg.phase === 'season' || lg.phase === 'playoffs' || lg.phase === 'done') {
+    return standings(lg).slice().reverse().map(t => t.id);
+  }
+  // Before the season: reverse of the first-round draft order.
+  return lg.teams.map(t => t.id).reverse();
+}
+function processWaivers(lg, nowMs = Date.now()) {
+  if (!lg.waivers || nowMs < lg.waiverNext) return 0;
+  const order = waiverOrder(lg);
+  const pending = lg.claims.slice().sort((a, b) => a.at - b.at);
+  let done = 0, progress = true;
+  const results = [];
+  while (progress && pending.length) {
+    progress = false;
+    for (const ti of order.slice()) {
+      const mine = pending.filter(c => c.ti === ti);
+      for (const c of mine) {
+        pending.splice(pending.indexOf(c), 1);
+        const t = lg.teams[ti];
+        const owned = ownerMap(lg);
+        const roster = rosterOf(t);
+        const canDrop = !c.drop || roster.includes(c.drop);
+        const room = roster.length - (c.drop ? 1 : 0) < ROSTER_MAX;
+        if (owned.has(c.add) || !canDrop || !room) { results.push({ ti, add: c.add, ok: false }); continue; }
+        if (c.drop) removeFromRoster(t, c.drop);
+        t.bench.push(c.add);
+        results.push({ ti, add: c.add, drop: c.drop || null, ok: true });
+        done++;
+        order.push(order.splice(order.indexOf(ti), 1)[0]); // go to the back
+        progress = true;
+        break; // one player per turn
+      }
+      if (progress) break;
+    }
+  }
+  lg.claims = [];
+  lg.waiverLog = results.slice(-40);
+  lg.waiverRanAt = nowMs;
+  lg.waiverNext = nextWaiverTime(nowMs);
+  return done;
 }
 
 /* Friends joining: take the first open spot (or a CPU team after the draft). */

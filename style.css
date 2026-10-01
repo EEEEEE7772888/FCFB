@@ -486,3 +486,75 @@ table { width: 100%; border-collapse: collapse; }
 
 .mv.locked { display: grid; place-items: center; background: transparent; color: var(--faint); }
 .mv.locked svg { width: 18px; height: 18px; }
+
+.brand-logo { width: 32px; height: 32px; display: block; flex: none; }
+.brand-logo.big { width: 76px; height: 76px; margin: 0 auto 14px; filter: drop-shadow(0 6px 18px rgba(246, 189, 58, .25)); }
+
+/* ---------- Badges ---------- */
+.bn { position: relative; }
+.bn-badge {
+  position: absolute; top: 6px; left: calc(50% + 6px); min-width: 17px; height: 17px; padding: 0 5px;
+  border-radius: 999px; background: var(--loss); color: #fff; font-style: normal; font-size: 10.5px; font-weight: 800;
+  display: grid; place-items: center; box-shadow: 0 0 0 2px var(--bg);
+}
+.st-badge { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--loss); color: #fff; font-style: normal; font-size: 11px; font-weight: 800; margin-left: 4px; }
+.subtabs.hub { margin-bottom: 10px; }
+
+/* ---------- Injury tags ---------- */
+.inj {
+  display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 4px; margin-left: 5px;
+  border-radius: 4px; font-size: 10.5px; font-weight: 900; vertical-align: 2px; color: #fff; font-style: normal;
+}
+.inj-Q { background: #d99a06; } .inj-D { background: #e2621b; } .inj-O { background: var(--loss); }
+.inj-text.inj-Q { color: #f6bd3a; background: none; } .inj-text.inj-D { color: #ff9a5c; background: none; } .inj-text.inj-O { color: var(--loss); background: none; }
+.inj-tools { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.inj-tools .chips { margin-bottom: 4px; }
+
+/* ---------- Trades ---------- */
+.trade { background: var(--surface); border-radius: var(--r-lg); padding: 14px; margin-bottom: 10px; }
+.trade.declined, .trade.canceled { opacity: .6; }
+.tr-head { display: flex; justify-content: space-between; gap: 10px; font-size: 14px; font-weight: 700; margin-bottom: 10px; }
+.tr-status { font-size: 12px; color: var(--muted); font-weight: 600; white-space: nowrap; }
+.trade.accepted .tr-status { color: var(--win); }
+.tr-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.tr-label { font-size: 11px; font-weight: 800; color: var(--faint); text-transform: uppercase; letter-spacing: .06em; margin: 14px 2px 6px; }
+.tr-cols .tr-label { margin-top: 0; }
+.tr-p { display: flex; align-items: center; gap: 8px; padding: 5px 0; min-width: 0; }
+.tr-p span { display: flex; flex-direction: column; min-width: 0; }
+.tr-p b { font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tr-p small { font-size: 11.5px; color: var(--muted); }
+.tr-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.chips.inmodal { margin: 12px -18px 4px; padding: 2px 18px; }
+.pick-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 12px; border-bottom: 1px solid var(--line); text-align: left; }
+.pick-row:last-child { border-bottom: 0; }
+.pick-row .ptext { flex: 1; }
+.pick-row > b { font-size: 14px; font-variant-numeric: tabular-nums; }
+.pick-row .tick { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--surface-3); flex: none; }
+.pick-row.on { background: var(--accent-soft); }
+.pick-row.on .tick { background: var(--accent); border-color: var(--accent); }
+.pick-row:disabled { opacity: .4; }
+
+/* ---------- Waivers ---------- */
+.waivers { padding: 14px; }
+.wv-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+.claim { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line-soft); }
+.claim .ptext { flex: 1; }
+.wv-log { display: flex; flex-direction: column; gap: 3px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line-soft); font-size: 12.5px; color: var(--muted); }
+
+/* ---------- Chat ---------- */
+.chat { display: flex; flex-direction: column; gap: 2px; padding: 4px 2px 80px; min-height: 50vh; }
+.chat-empty { text-align: center; color: var(--muted); padding: 60px 20px; }
+.chat-day { align-self: center; font-size: 11.5px; font-weight: 700; color: var(--faint); margin: 14px 0 6px; }
+.msg { display: flex; flex-direction: column; align-items: flex-start; max-width: 80%; margin-top: 6px; }
+.msg.mine { align-self: flex-end; align-items: flex-end; }
+.msg-name { font-size: 12px; color: var(--muted); font-weight: 600; margin: 0 0 3px 12px; }
+.bubble { background: var(--surface-2); padding: 9px 13px; border-radius: 18px; border-bottom-left-radius: 6px; font-size: 15px; line-height: 1.35; overflow-wrap: anywhere; white-space: pre-wrap; }
+.msg.mine .bubble { background: var(--accent); color: #fff; border-radius: 18px; border-bottom-right-radius: 6px; }
+.msg-time { font-size: 10.5px; color: var(--faint); margin: 3px 10px 0; }
+.chat-bar {
+  position: fixed; left: 0; right: 0; bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px)); z-index: 15;
+  display: flex; gap: 8px; padding: 8px 12px; max-width: 640px; margin: 0 auto;
+  background: rgba(11, 13, 16, .92); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+}
+.chat-bar .input { flex: 1; min-height: 44px; border-radius: 999px; }
+.chat-bar .btn { width: 44px; padding: 0; flex: none; }

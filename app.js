@@ -9,6 +9,7 @@ const UI = {
   move: null, modal: null, week: null, game: null, paused: false, create: null,
   auth: { mode: 'signin', email: '', pw: '', error: '', busy: false },
   join: null, // { id, lg, teamName, busy, error }
+  ltab: 'standings', trade: null, chat: { id: null, msgs: [], unsub: null, draft: '' },
 };
 let busy = false; // a save is in progress
 
@@ -108,6 +109,7 @@ const ICON = {
   standings: '<svg viewBox="0 0 24 24"><path d="M5 20V11M12 20V5M19 20v-6"/></svg>',
   league: '<svg viewBox="0 0 24 24"><path d="M5 3v18M5 4h12l-2 4 2 4H5"/></svg>',
   draft: '<svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>',
+  chat: '<svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></svg>',
   lobby: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-3 3-5 6-5s6 2 6 5M16 11a3 3 0 1 0 0-6M18 15c2 .6 3 2.3 3 5"/></svg>',
 };
 
@@ -150,13 +152,16 @@ function render() {
     }
   }
   updateClock();
+  watchChat(UI.view === 'league' ? lg : null);
+  updateTitle();
+  if (UI.view === 'league' && UI.tab === 'chat') scrollChat();
 }
 
 function header(lg) {
   if (!lg) {
     return `<header class="topbar"><div class="topbar-in">
       <button class="brand" data-act="home" aria-label="Home">
-        <span class="brand-mark">FC</span><span class="brand-name">FCFB</span>
+        <img class="brand-logo" src="logo.svg" alt=""><span class="brand-name">FCFB</span>
       </button>
       ${Store.mode === 'cloud' && Store.user ? `<button class="tb-account" data-act="account" aria-label="Account">${esc((Store.displayName()[0] || '?').toUpperCase())}</button>` : ''}
     </div></header>`;
@@ -171,13 +176,18 @@ function header(lg) {
 }
 
 function bottomNav(lg) {
+  const chat = lg.multi ? [['chat', 'Chat']] : [];
   const tabs = lg.phase === 'lobby'
-    ? [['lobby', 'Lobby'], ['league', 'League']]
+    ? [['lobby', 'Lobby'], ...chat, ['league', 'League']]
     : lg.phase === 'draft'
-    ? [['draft', 'Draft'], ['league', 'League']]
-    : [['team', 'My Team'], ['matchup', 'Matchup'], ['players', 'Players'], ['standings', 'Standings'], ['league', 'League']];
+    ? [['draft', 'Draft'], ...chat, ['league', 'League']]
+    : [['team', 'My Team'], ['matchup', 'Matchup'], ['players', 'Players'], ['league', 'League'], ...chat];
+  const badge = k => {
+    const n = k === 'chat' ? unreadCount(lg) : k === 'league' ? incomingTrades(lg).length : 0;
+    return n ? `<i class="bn-badge">${n > 9 ? '9+' : n}</i>` : '';
+  };
   return `<nav class="bottomnav">${tabs.map(([k, label]) =>
-    `<button class="bn ${UI.tab === k ? 'on' : ''}" data-act="tab" data-id="${k}">${ICON[k]}<span>${label}</span></button>`).join('')}</nav>`;
+    `<button class="bn ${UI.tab === k ? 'on' : ''}" data-act="tab" data-id="${k}">${ICON[k]}${badge(k)}<span>${label}</span></button>`).join('')}</nav>`;
 }
 
 /* ---------- Home ---------- */
@@ -215,7 +225,7 @@ function viewHome() {
   ${deviceCount ? `<div class="banner info" style="margin-top:14px"><span>You have ${deviceCount} league${deviceCount === 1 ? '' : 's'} saved on this device from before accounts.</span>
     <button class="btn btn-sm" data-act="import">Add to my account</button></div>` : ''}
   ${cards ? `<div class="list-card">${cards}</div>` : `<div class="empty-card">
-    <div class="brand-mark big">FC</div>
+    <img class="brand-logo big" src="logo.svg" alt="FCFB logo">
     <h3>Start your first league</h3>
     <p>Pick your conferences, draft real college players, and play against friends or CPU managers.</p>
     <button class="btn btn-primary btn-lg" data-act="new">Create a league</button></div>`}
@@ -275,7 +285,7 @@ function viewAuth() {
   const up = s.mode === 'signup';
   return `
   <section class="auth-hero">
-    <div class="brand-mark big">FC</div>
+    <img class="brand-logo big" src="logo.svg" alt="FCFB logo">
     <h1>${joining ? 'You\'re invited' : 'FCFB'}</h1>
     <p>${joining ? 'Sign in to join your friend\'s league.' : 'College fantasy football. Sign in to keep your leagues on every device and play with friends.'}</p>
   </section>
@@ -439,17 +449,18 @@ function viewCreate() {
 
 /* ---------- League shell ---------- */
 function viewLeague(lg) {
-  if (lg.phase === 'lobby' && !['lobby', 'league'].includes(UI.tab)) UI.tab = 'lobby';
+  if (lg.phase === 'lobby' && !['lobby', 'league', 'chat'].includes(UI.tab)) UI.tab = 'lobby';
   if (lg.phase !== 'lobby' && UI.tab === 'lobby') UI.tab = 'draft';
-  if (lg.phase === 'draft' && !['draft', 'league'].includes(UI.tab)) UI.tab = 'draft';
+  if (lg.phase === 'draft' && !['draft', 'league', 'chat'].includes(UI.tab)) UI.tab = 'draft';
   if (lg.phase !== 'draft' && lg.phase !== 'lobby' && UI.tab === 'draft') UI.tab = 'team';
   switch (UI.tab) {
     case 'lobby': return viewLobby(lg);
     case 'draft': return viewDraft(lg);
     case 'matchup': return viewMatchup(lg);
     case 'players': return viewPlayers(lg);
-    case 'standings': return viewStandings(lg);
-    case 'league': return viewLeagueInfo(lg);
+    case 'standings': UI.tab = 'league'; UI.ltab = 'standings'; return viewLeagueHub(lg);
+    case 'league': return viewLeagueHub(lg);
+    case 'chat': return viewChat(lg);
     default: return viewTeam(lg);
   }
 }
@@ -487,7 +498,7 @@ function viewLobby(lg) {
 function pmain(p, extra = '') {
   return `<button class="pmain" data-act="player" data-id="${p.id}">
     ${playerAvatar(p)}
-    <span class="ptext"><span class="pname">${esc(p.pos === 'DST' ? p.team + ' D/ST' : p.name)}</span>
+    <span class="ptext"><span class="pname">${esc(p.pos === 'DST' ? p.team + ' D/ST' : p.name)}${injBadge(activeLeague(), p.id)}</span>
     <span class="pmeta">${posBadge(p.pos)}<span class="ellip">${esc(p.team)}${extra}</span></span></span>
   </button>`;
 }
@@ -713,7 +724,7 @@ function viewTeam(lg) {
       : bye ? `<b class="bye">Bye</b><small>wk ${w}</small>`
       : gameDone(lg, p, w) ? `<b>${fmt(weekPts(lg, p, w))}</b><small>pts</small>`
       : `<b>${fmt(weekProj(lg, p, w))}</b><small>proj</small>`;
-    return `<div class="lrow ${isSel ? 'sel' : ''} ${mv && !isSel && !isT ? 'dim' : ''} ${slot !== 'BN' && (bye || !p) ? 'warn' : ''}">
+    return `<div class="lrow ${isSel ? 'sel' : ''} ${mv && !isSel && !isT ? 'dim' : ''} ${slot !== 'BN' && (bye || !p || injuryOf(lg, pid) === 'O') ? 'warn' : ''}">
       <div class="slot">${posLabel(slot)}</div>
       ${p ? pmain(p, `${p.bye ? `, bye ${p.bye}` : ''}${lastPts}`) : '<div class="pmain empty">Empty</div>'}
       <div class="pnum">${num}</div>${btn}</div>`;
@@ -844,7 +855,7 @@ function matchCard(lg, g, w, played, me) {
     const real = played || line.done;
     const meta = real ? statLine(lg, p, w, line.pts) : bye ? 'Bye week' : `${posLabel(p.pos)}, ${p.team}`;
     return `<div class="mside ${side} ${bye ? 'bye' : ''}">
-      ${playerAvatar(p, 'sm')}<button class="mp" data-act="player" data-id="${p.id}"><span class="mp-name">${esc(shortName(p))}</span><span class="mp-meta">${esc(meta)}</span></button>
+      ${playerAvatar(p, 'sm')}<button class="mp" data-act="player" data-id="${p.id}"><span class="mp-name">${esc(shortName(p))}${injBadge(lg, p.id)}</span><span class="mp-meta">${esc(meta)}</span></button>
       <div class="mp-pts ${real ? '' : 'proj'}">${bye ? '—' : fmt(line.pts)}</div></div>`;
   };
   const rows = al.map((l, i) => `<div class="mrow">${cell(l, 'l')}<div class="mslot">${posLabel(l.slot)}</div>${cell(bl[i], 'r')}</div>`).join('');
@@ -870,6 +881,7 @@ function matchCard(lg, g, w, played, me) {
 function viewPlayers(lg) {
   const t = lg.teams[userIdx(lg)];
   return `<div class="page-row"><h2 class="sec-title flat">Free agents</h2><span class="muted small">Your roster ${rosterOf(t).length}/${ROSTER_MAX}</span></div>
+    ${claimsCard(lg)}
     ${filterBar(lg, true)}
     <div id="plist" class="plist">${faList(lg)}</div>`;
 }
@@ -884,12 +896,16 @@ function faList(lg) {
     list = list.sort((a, b) => projPts(b, lg.scoring) - projPts(a, lg.scoring));
   }
   const shown = list.slice(0, 100);
+  const claimed = new Set(myClaims(lg).map(c => c.add));
   if (!shown.length) return `<div class="empty-card">No free agents match those filters.</div>`;
   return shown.map(p => `<div class="prow">
     ${pmain(p, `, ${esc(confShort(p.conf))}${p.bye ? `, bye ${p.bye}` : ''}`)}
     ${hasPts ? `<div class="pnum"><b>${fmt(seasonPts(lg, p))}</b><small>season</small></div>` : ''}
     <div class="pnum"><b>${fmt(projPts(p, lg.scoring))}</b><small>proj</small></div>
-    <button class="btn btn-sm btn-primary" data-act="add" data-id="${p.id}" ${done ? 'disabled' : ''} aria-label="Add ${esc(p.name)}">Add</button>
+    ${waiversOn(lg)
+      ? (claimed.has(p.id) ? `<button class="btn btn-sm" data-act="claim-cancel" data-id="${p.id}">Claimed</button>`
+        : `<button class="btn btn-sm btn-primary" data-act="add" data-id="${p.id}" ${done ? 'disabled' : ''} aria-label="Claim ${esc(p.name)}">Claim</button>`)
+      : `<button class="btn btn-sm btn-primary" data-act="add" data-id="${p.id}" ${done ? 'disabled' : ''} aria-label="Add ${esc(p.name)}">Add</button>`}
   </div>`).join('') + (list.length > 100 ? `<p class="muted small center">Showing 100 of ${list.length}. Search or filter to narrow it down.</p>` : '');
 }
 
@@ -941,6 +957,7 @@ function viewLeagueInfo(lg) {
       <dt>Points from</dt><dd>${usesReal(lg) ? 'Real games' : 'Simulated'}</dd>
       ${lg.phase !== 'lobby' && me >= 0 ? `<dt>Your draft slot</dt><dd>${ordinal(me + 1)}</dd>` : ''}
       ${lg.multi ? `<dt>Draft</dt><dd>${lg.draftType === 'turns' ? 'Take turns' : `Live, ${lg.pickSeconds} sec per pick`}</dd>` : ''}
+      ${lg.multi ? `<dt>Waivers</dt><dd>${lg.waivers ? 'On, daily at 4 AM ET' : 'Off, adds are instant'}${isCommish(lg) ? ` <button class="link" data-act="toggle-waivers">${lg.waivers ? 'Turn off' : 'Turn on'}</button>` : ''}</dd>` : ''}
       <dt>Season</dt><dd>${REG_WEEKS} weeks, ${PLAYOFF_TEAMS}-team playoff</dd>
     </dl>
     <div class="conf-pills">${lg.conferences.map(id => {
@@ -961,17 +978,231 @@ function viewLeagueInfo(lg) {
     : `<button class="btn btn-danger btn-block" data-act="leave">Leave league</button>`}`;
 }
 
+/* ---------- League hub: standings, trades, settings ---------- */
+function viewLeagueHub(lg) {
+  const season = !['lobby', 'draft'].includes(lg.phase);
+  if (!season) return viewLeagueInfo(lg);
+  const tabs = [['standings', 'Standings'], ['trades', 'Trades'], ['settings', 'Settings']];
+  const n = incomingTrades(lg).length;
+  const sub = `<div class="subtabs hub">${tabs.map(([k, l]) =>
+    `<button class="st ${UI.ltab === k ? 'on' : ''}" data-act="ltab" data-id="${k}">${l}${k === 'trades' && n ? ` <i class="st-badge">${n}</i>` : ''}</button>`).join('')}</div>`;
+  const body = UI.ltab === 'trades' ? viewTrades(lg) : UI.ltab === 'settings' ? viewLeagueInfo(lg) : viewStandings(lg);
+  return sub + body;
+}
+
+/* ---------- Trades ---------- */
+function incomingTrades(lg) {
+  const me = userIdx(lg);
+  return (lg.trades || []).filter(t => t.status === 'pending' && t.to === me);
+}
+function tradeSide(ids) {
+  return ids.length ? ids.map(pid => {
+    const p = PMAP.get(pid);
+    return p ? `<div class="tr-p">${playerAvatar(p, 'sm')}<span><b>${esc(p.name)}</b><small>${posLabel(p.pos)}, ${esc(p.team)}</small></span></div>` : '';
+  }).join('') : '<div class="tr-p muted small">Nothing</div>';
+}
+function tradeCard(lg, t) {
+  const me = userIdx(lg);
+  const A = lg.teams[t.from], B = lg.teams[t.to];
+  const status = { pending: 'Waiting for an answer', accepted: 'Accepted', declined: 'Declined', canceled: 'Canceled' }[t.status];
+  let actions = '';
+  if (t.status === 'pending' && t.to === me) {
+    actions = `<div class="tr-actions"><button class="btn btn-sm" data-act="trade-no" data-id="${t.id}">Decline</button>
+      <button class="btn btn-sm btn-primary" data-act="trade-yes" data-id="${t.id}">Accept</button></div>`;
+  } else if (t.status === 'pending' && t.from === me) {
+    actions = `<div class="tr-actions"><button class="btn btn-sm" data-act="trade-cancel" data-id="${t.id}">Cancel offer</button></div>`;
+  }
+  return `<div class="trade ${t.status}">
+    <div class="tr-head"><span>${esc(A.name)} <span class="muted">offers</span> ${esc(B.name)}</span><span class="tr-status">${status}</span></div>
+    <div class="tr-cols">
+      <div><div class="tr-label">${t.from === me ? 'You give' : t.to === me ? 'You get' : esc(A.name) + ' gives'}</div>${tradeSide(t.give)}</div>
+      <div><div class="tr-label">${t.from === me ? 'You get' : t.to === me ? 'You give' : esc(A.name) + ' gets'}</div>${tradeSide(t.get)}</div>
+    </div>${actions}</div>`;
+}
+function viewTrades(lg) {
+  const me = userIdx(lg);
+  const trades = (lg.trades || []).slice().reverse();
+  const open = trades.filter(t => t.status === 'pending' && (t.to === me || t.from === me));
+  const done = trades.filter(t => t.status !== 'pending').slice(0, 12);
+  const canTrade = lg.phase !== 'done' && me >= 0;
+  return `${canTrade ? `<button class="btn btn-primary btn-block" data-act="trade-new">Propose a trade</button>` : ''}
+    <h2 class="sec-title">Open offers</h2>
+    ${open.length ? open.map(t => tradeCard(lg, t)).join('') : `<div class="empty-card small">No open offers. ${lg.multi ? 'Friends can send you offers too.' : 'CPU managers answer right away.'}</div>`}
+    ${done.length ? `<h2 class="sec-title">Recent trades</h2>${done.map(t => tradeCard(lg, t)).join('')}` : ''}`;
+}
+function tradeModal(lg) {
+  const s = UI.trade;
+  const me = userIdx(lg);
+  const others = lg.teams.filter(t => t.id !== me);
+  const partner = s.to != null ? lg.teams[s.to] : null;
+  const pick = (team, chosen, act) => rosterOf(team).map(pid => PMAP.get(pid))
+    .sort((x, y) => POS_ORDER[x.pos] - POS_ORDER[y.pos] || projPts(y, lg.scoring) - projPts(x, lg.scoring))
+    .map(p => {
+      const lockedP = isLocked(lg, p.id);
+      return `<button class="pick-row ${chosen.includes(p.id) ? 'on' : ''}" data-act="${act}" data-id="${p.id}" ${lockedP ? 'disabled' : ''}>
+        ${playerAvatar(p, 'sm')}<span class="ptext"><span class="pname">${esc(p.name)}${injBadge(lg, p.id)}</span><span class="pmeta">${posBadge(p.pos)}<span>${esc(p.team)}${lockedP ? ', locked' : ''}</span></span></span>
+        <b>${fmt(projPts(p, lg.scoring))}</b><span class="tick"></span></button>`;
+    }).join('');
+  const problem = partner ? tradeProblem(lg, me, s.to, s.give, s.get) : '';
+  return `<h3 class="m-h">Propose a trade</h3>
+    <div class="chips scroll inmodal">${others.map(t => `<button class="chip ${s.to === t.id ? 'on' : ''}" data-act="trade-to" data-id="${t.id}">${esc(t.name)}${isHuman(t) ? '' : ' (CPU)'}</button>`).join('')}</div>
+    ${partner ? `
+      <div class="tr-label">You give</div><div class="m-list">${pick(lg.teams[me], s.give, 'trade-give')}</div>
+      <div class="tr-label">You get from ${esc(partner.name)}</div><div class="m-list">${pick(partner, s.get, 'trade-get')}</div>
+      ${problem && (s.give.length || s.get.length) ? `<div class="banner bad" style="margin-top:12px">${esc(problem)}</div>` : ''}
+      <button class="btn btn-primary btn-block btn-lg" data-act="trade-send" ${problem ? 'disabled' : ''}>${isHuman(partner) ? 'Send offer' : 'Send to CPU'}</button>
+      ${isHuman(partner) ? '' : '<p class="muted small center">CPU managers accept trades that help their team.</p>'}`
+    : '<p class="muted">Pick a team to trade with.</p>'}`;
+}
+
+/* ---------- Waivers ---------- */
+function waiversOn(lg) { return !!(lg && lg.multi && lg.waivers && ['season', 'playoffs'].includes(lg.phase)); }
+function myClaims(lg) { const me = userIdx(lg); return (lg.claims || []).filter(c => c.ti === me); }
+function waiverTimeText(lg) {
+  const d = new Date(lg.waiverNext);
+  return d.toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+}
+function claimsCard(lg) {
+  if (!waiversOn(lg)) return '';
+  const claims = myClaims(lg);
+  const order = waiverOrder(lg);
+  const pos = order.indexOf(userIdx(lg)) + 1;
+  const log = (lg.waiverLog || []).filter(r => r.ok).slice(-5).reverse();
+  return `<div class="card waivers">
+    <div class="wv-head"><b>Waivers</b><span class="muted small">Next run ${esc(waiverTimeText(lg))} · You pick ${ordinal(pos)}</span></div>
+    ${claims.length ? claims.map(c => {
+      const p = PMAP.get(c.add), d = c.drop && PMAP.get(c.drop);
+      return `<div class="claim">${playerAvatar(p, 'sm')}<span class="ptext"><span class="pname">${esc(p.name)}</span>
+        <span class="pmeta">${d ? `Drop ${esc(d.name)}` : 'No drop needed'}</span></span>
+        <button class="btn btn-sm" data-act="claim-cancel" data-id="${c.add}">Cancel</button></div>`;
+    }).join('') : '<p class="muted small">Tap Claim on a free agent. Claims run once a day, and the team lowest in the standings gets first choice.</p>'}
+    ${log.length ? `<div class="wv-log">${log.map(r => `<span>${esc(lg.teams[r.ti].name)} added ${esc(PMAP.get(r.add).name)}</span>`).join('')}</div>` : ''}
+  </div>`;
+}
+
+/* ---------- Injury tags ---------- */
+function injBadge(lg, pid) {
+  const inj = injuryOf(lg, pid);
+  return inj ? ` <span class="inj inj-${inj}" title="${INJ_LABEL[inj]}">${inj}</span>` : '';
+}
+
+/* ---------- Chat ---------- */
+const SEEN_KEY = 'fcfb-chat-seen';
+// "Read up to" times are saved per person, so two accounts on one computer don't mix.
+function seenKey() { return SEEN_KEY + ':' + ME_UID; }
+function chatSeen(id) { try { return JSON.parse(localStorage.getItem(seenKey()) || '{}')[id] || 0; } catch (e) { return 0; } }
+function markChatSeen(id, at) {
+  try { const m = JSON.parse(localStorage.getItem(seenKey()) || '{}'); m[id] = at; localStorage.setItem(seenKey(), JSON.stringify(m)); } catch (e) { /* ignore */ }
+}
+function unreadCount(lg) {
+  const c = UI.chat;
+  if (!lg || c.id !== lg.id || !c.msgs) return 0;
+  const seen = chatSeen(lg.id);
+  return c.msgs.filter(m => m.at > seen && m.uid !== ME_UID).length;
+}
+function watchChat(lg) {
+  const c = UI.chat;
+  const want = lg && lg.multi && Store.mode === 'cloud' ? lg.id : null;
+  if (c.id === want) return;
+  if (c.unsub) c.unsub();
+  c.id = want; c.msgs = []; c.unsub = null;
+  if (!want) return;
+  let first = true;
+  c.unsub = Store.listenChat(want, msgs => {
+    if (!msgs) return;
+    const prevLast = c.msgs.length ? c.msgs[c.msgs.length - 1].at : 0;
+    c.msgs = msgs;
+    const newest = msgs[msgs.length - 1];
+    if (!first && newest && newest.at > prevLast && newest.uid !== ME_UID) {
+      alertUser(`${newest.name}: ${newest.text}`, `chat-${newest.id}`);
+    }
+    first = false;
+    if (UI.tab === 'chat' && newest) markChatSeen(want, newest.at);
+    if (UI.tab === 'chat') renderChatOnly(); else render();
+  });
+}
+function chatMessages(lg) {
+  const c = UI.chat;
+  if (!c.msgs.length) return `<div class="chat-empty">No messages yet. Start the trash talk.</div>`;
+  let lastDay = '';
+  return c.msgs.map(m => {
+    const mine = m.uid === ME_UID;
+    const d = new Date(m.at);
+    const day = d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+    const sep = day !== lastDay ? `<div class="chat-day">${day}</div>` : '';
+    lastDay = day;
+    return `${sep}<div class="msg ${mine ? 'mine' : ''}">
+      ${mine ? '' : `<div class="msg-name">${esc(m.name || 'Friend')}</div>`}
+      <div class="bubble">${esc(m.text)}</div>
+      <div class="msg-time">${d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</div></div>`;
+  }).join('');
+}
+function viewChat(lg) {
+  if (!lg.multi || Store.mode !== 'cloud') return `<div class="empty-card">Chat is for leagues with friends.</div>`;
+  return `<div class="chat" id="chat-list">${chatMessages(lg)}</div>
+    <div class="chat-bar"><input id="chat-input" class="input" placeholder="Message ${esc(lg.name)}" maxlength="500" autocomplete="off" value="${esc(UI.chat.draft)}">
+      <button class="btn btn-primary" data-act="chat-send" aria-label="Send"><svg viewBox="0 0 24 24"><path d="M4 12l16-8-6 16-2-7z"/></svg></button></div>`;
+}
+function renderChatOnly() {
+  const el = document.getElementById('chat-list');
+  if (!el) { render(); return; }
+  const lg = activeLeague();
+  el.innerHTML = chatMessages(lg);
+  scrollChat();
+  const nav = document.querySelector('.bottomnav');
+  if (nav) nav.outerHTML = bottomNav(lg);
+}
+function scrollChat() {
+  if (UI.tab === 'chat') window.scrollTo(0, document.body.scrollHeight);
+}
+
+/* ---------- Alerts ----------
+   While the app is open (even in another tab): a count in the tab title and,
+   if you allow it, a pop-up notification. */
+const alerted = new Set();
+function alertUser(text, key) {
+  if (alerted.has(key)) return;
+  alerted.add(key);
+  if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
+    try { new Notification('FCFB', { body: text, icon: 'logo-192.png', tag: key }); } catch (e) { /* ignore */ }
+  }
+}
+function pendingAlerts() {
+  let n = 0;
+  for (const lg of Store.list()) {
+    const me = userIdx(lg);
+    if (me < 0) continue;
+    if (lg.phase === 'draft' && onClock(lg) === me) {
+      n++; alertUser(`It's your pick in ${lg.name}!`, `pick-${lg.id}-${lg.picks.length}`);
+    }
+    for (const t of incomingTrades(lg)) {
+      n++; alertUser(`${lg.teams[t.from].name} sent you a trade offer in ${lg.name}.`, `trade-${t.id}`);
+    }
+  }
+  n += unreadCount(activeLeague());
+  return n;
+}
+function updateTitle() {
+  const n = Store.authReady ? pendingAlerts() : 0;
+  document.title = n ? `(${n}) FCFB` : 'FCFB';
+}
+
 /* ---------- Modals ---------- */
 function viewModal(lg) {
   const m = UI.modal;
   let inner = '';
   if (m.type === 'player' && lg) inner = playerModal(lg, PMAP.get(m.id));
+  else if (m.type === 'trade' && lg) inner = tradeModal(lg);
   else if (m.type === 'drop' && lg) inner = dropModal(lg, PMAP.get(m.id));
   else if (m.type === 'delete') {
     inner = `<h3 class="m-h">Delete this league?</h3><p class="muted">This removes the league and all of its results${lg && lg.multi ? ' for everyone in it' : ''}.</p>
       <div class="m-actions"><button class="btn" data-act="close-modal">Keep league</button><button class="btn btn-danger" data-act="confirm-delete">Delete league</button></div>`;
   } else if (m.type === 'account') {
+    const canNotify = 'Notification' in window;
+    const notifyOn = canNotify && Notification.permission === 'granted';
     inner = `<h3 class="m-h">Account</h3><p class="muted">Signed in as <b>${esc(Store.user ? (Store.user.email || Store.displayName()) : '')}</b></p>
+      ${canNotify ? `<div class="banner info"><span>${notifyOn ? 'Alerts are on. You\'ll get a pop-up for your draft picks, trade offers, and chat while FCFB is open.' : 'Get a pop-up when it\'s your pick, someone sends a trade, or a friend chats, while FCFB is open in a tab.'}</span>
+        ${notifyOn ? '' : '<button class="btn btn-sm btn-primary" data-act="alerts-on">Turn on</button>'}</div>` : ''}
       <div class="m-actions"><button class="btn" data-act="close-modal">Close</button><button class="btn btn-danger" data-act="signout">Sign out</button></div>`;
   } else if (m.type === 'leave') {
     inner = `<h3 class="m-h">Leave this league?</h3><p class="muted">A CPU manager takes over your team. You can rejoin later with an invite link if a spot is open.</p>
@@ -996,10 +1227,16 @@ function playerModal(lg, p) {
   } else if (lg.phase !== 'done') {
     if (owner == null) action = `<button class="btn btn-primary btn-block" data-act="add" data-id="${p.id}">Add to my team</button>`;
     else if (owner === me) action = `<button class="btn btn-danger btn-block" data-act="drop" data-id="${p.id}">Drop from my team</button>`;
+    else if (me >= 0) action = `<button class="btn btn-primary btn-block" data-act="trade-for" data-id="${p.id}">Propose a trade for him</button>`;
+    if (owner == null && waiversOn(lg)) action = `<button class="btn btn-primary btn-block" data-act="add" data-id="${p.id}">Put in a waiver claim</button>`;
   }
+  const inj = injuryOf(lg, p.id);
+  const injTools = isCommish(lg) && lg.phase !== 'done' && p.pos !== 'DST' ? `<div class="inj-tools"><span class="muted small">Injury status (commissioner)</span>
+      <div class="chips">${[['', 'Healthy'], ['Q', 'Q'], ['D', 'D'], ['O', 'Out']].map(([k, l]) =>
+        `<button class="chip ${inj === k ? 'on' : ''}" data-act="set-inj" data-id="${p.id}:${k}">${l}</button>`).join('')}</div></div>` : '';
   return `<div class="pm-head" style="--conf:${conf.color}">
       ${playerAvatar(p, 'xl')}
-      <div><div class="pm-name">${esc(p.name)}</div>
+      <div><div class="pm-name">${esc(p.name)}${injBadge(lg, p.id)}</div>
         <div class="pm-meta">${posBadge(p.pos)} ${esc(p.team)}, ${esc(conf.name)}${p.year ? `, ${p.year}` : ''}</div></div>
     </div>
     <div class="pm-stats">
@@ -1008,7 +1245,8 @@ function playerModal(lg, p) {
       <div><b>${rankOf(lg, p.id) || '—'}</b><small>League rank</small></div>
       <div><b>${p.bye ? 'Wk ' + p.bye : 'None'}</b><small>Bye</small></div>
     </div>
-    <p class="muted small">${owner == null ? 'Free agent' : owner === me ? 'On your team' : `On ${esc(lg.teams[owner].name)}`}</p>
+    <p class="muted small">${owner == null ? 'Free agent' : owner === me ? 'On your team' : `On ${esc(lg.teams[owner].name)}`}${inj ? ` · <b class="inj-text inj-${inj}">${INJ_LABEL[inj]}</b>` : ''}</p>
+    ${injTools}
     ${log ? `<div class="table-wrap"><table class="glog"><thead><tr><th>Wk</th><th>Line</th><th class="num">Pts</th></tr></thead><tbody>${log}</tbody></table></div>` : ''}
     ${action}`;
 }
@@ -1018,7 +1256,8 @@ function dropModal(lg, add) {
     .sort((a, b) => POS_ORDER[a.pos] - POS_ORDER[b.pos])
     .map(p => `<div class="prow">${pmain(p)}<div class="pnum"><b>${fmt(projPts(p, lg.scoring))}</b><small>proj</small></div>
       <button class="btn btn-sm btn-danger" data-act="swapdrop" data-id="${p.id}">Drop</button></div>`).join('');
-  return `<h3 class="m-h">Roster full</h3><p class="muted">Drop a player to add <b>${esc(add.name)}</b> (${posLabel(add.pos)}, ${esc(add.team)}).</p>
+  const claim = UI.modal && UI.modal.claim;
+  return `<h3 class="m-h">Roster full</h3><p class="muted">${claim ? 'Pick who to drop if your claim for' : 'Drop a player to add'} <b>${esc(add.name)}</b> (${posLabel(add.pos)}, ${esc(add.team)})${claim ? ' goes through' : ''}.</p>
     <div class="m-list">${rows}</div>`;
 }
 
@@ -1031,6 +1270,20 @@ const scoreTried = new Map();
 function autoScore() {
   if (busy) return;
   for (const lg of Store.list()) {
+    if (lg.multi && lg.waivers && ['season', 'playoffs'].includes(lg.phase) && userIdx(lg) >= 0 && Date.now() >= lg.waiverNext) {
+      const key = 'wv:' + lg.id + ':' + lg.waiverNext;
+      if (!scoreTried.has(key)) {
+        scoreTried.set(key, Date.now());
+        const due = lg.waiverNext;
+        let added = 0;
+        Store.update(lg.id, fresh => {
+          if (fresh.waiverNext !== due) return false;
+          added = processWaivers(fresh);
+          return true;
+        }).then(ok => { if (ok && added) toast(`${lg.name}: waivers ran, ${added} player${added === 1 ? '' : 's'} added.`); })
+          .catch(err => console.error(err));
+      }
+    }
     if (!usesReal(lg) || !['season', 'playoffs'].includes(lg.phase) || userIdx(lg) < 0) continue;
     if (!weekReady(lg, lg.week)) continue;
     const key = lg.id + ':' + lg.week;
@@ -1247,7 +1500,12 @@ const actions = {
   },
 
   /* ----- Draft ----- */
-  tab(id) { UI.tab = id; UI.move = null; UI.week = null; UI.game = null; UI.f.q = ''; render(); window.scrollTo(0, 0); },
+  tab(id) {
+    UI.tab = id; UI.move = null; UI.week = null; UI.game = null; UI.f.q = '';
+    if (id === 'chat' && UI.chat.msgs.length) markChatSeen(UI.leagueId, UI.chat.msgs[UI.chat.msgs.length - 1].at);
+    render();
+    if (id === 'chat') scrollChat(); else window.scrollTo(0, 0);
+  },
   dtab(id) { UI.dtab = id; render(); },
   fpos(id) { UI.f.pos = id; render(); },
   draft(id) {
@@ -1304,8 +1562,17 @@ const actions = {
     const lg = activeLeague();
     const t = lg.teams[userIdx(lg)];
     if (!t || ownerMap(lg).has(id)) return;
-    if (rosterOf(t).length >= ROSTER_MAX) { UI.modal = { type: 'drop', id }; render(); return; }
+    const claim = waiversOn(lg);
+    if (rosterOf(t).length >= ROSTER_MAX) { UI.modal = { type: 'drop', id, claim }; render(); return; }
     UI.modal = null;
+    if (claim) {
+      mutate(fresh => {
+        const me = userIdx(fresh);
+        if (me < 0 || ownerMap(fresh).has(id) || fresh.claims.some(c => c.ti === me && c.add === id)) return false;
+        fresh.claims.push({ ti: me, add: id, drop: null, at: Date.now() });
+      }, `Claim for ${PMAP.get(id).name} is in. Waivers run ${waiverTimeText(lg)}.`);
+      return;
+    }
     mutate(fresh => {
       const ft = fresh.teams[userIdx(fresh)];
       if (!ft || ownerMap(fresh).has(id) || rosterOf(ft).length >= ROSTER_MAX) return false;
@@ -1319,7 +1586,17 @@ const actions = {
   },
   swapdrop(id) {
     const add = UI.modal.id;
+    const claim = UI.modal.claim;
     UI.modal = null;
+    if (claim) {
+      mutate(lg => {
+        const me = userIdx(lg);
+        if (me < 0 || ownerMap(lg).has(add)) return false;
+        lg.claims = lg.claims.filter(c => !(c.ti === me && c.add === add));
+        lg.claims.push({ ti: me, add, drop: id, at: Date.now() });
+      }, `Claim for ${PMAP.get(add).name} is in. If it goes through, ${PMAP.get(id).name} gets dropped.`);
+      return;
+    }
     mutate(lg => {
       const t = lg.teams[userIdx(lg)];
       if (!t || ownerMap(lg).has(add) || !rosterOf(t).includes(id)) return false;
@@ -1329,6 +1606,87 @@ const actions = {
       if (si >= 0 && !isLocked(lg, add) && ELIG[t.starters[si].slot].includes(PMAP.get(add).pos)) t.starters[si].pid = add;
       else t.bench.push(add);
     }, `Added ${PMAP.get(add).name}, dropped ${PMAP.get(id).name}.`);
+  },
+
+  'claim-cancel'(id) {
+    mutate(lg => {
+      const me = userIdx(lg);
+      const before = lg.claims.length;
+      lg.claims = lg.claims.filter(c => !(c.ti === me && c.add === id));
+      return lg.claims.length !== before;
+    }, 'Claim canceled.');
+  },
+
+  /* ----- Trades ----- */
+  ltab(id) { UI.ltab = id; render(); },
+  'trade-new'() { UI.trade = { to: null, give: [], get: [] }; UI.modal = { type: 'trade' }; render(); },
+  'trade-for'(pid) {
+    const lg = activeLeague();
+    const owner = ownerMap(lg).get(pid);
+    UI.trade = { to: owner, give: [], get: [pid] };
+    UI.modal = { type: 'trade' }; render();
+  },
+  'trade-to'(id) { UI.trade = { to: +id, give: UI.trade.give, get: [] }; render(); },
+  'trade-give'(pid) { const s = UI.trade.give; s.includes(pid) ? s.splice(s.indexOf(pid), 1) : s.push(pid); render(); },
+  'trade-get'(pid) { const s = UI.trade.get; s.includes(pid) ? s.splice(s.indexOf(pid), 1) : s.push(pid); render(); },
+  'trade-send'() {
+    const s = UI.trade;
+    let result = null;
+    UI.modal = null;
+    mutate(lg => {
+      result = proposeTrade(lg, userIdx(lg), s.to, s.give, s.get);
+      return !result.error;
+    }).then(ok => {
+      UI.tab = 'league'; UI.ltab = 'trades';
+      if (!ok) toast(result && result.error ? result.error : "Couldn't send that offer.");
+      else if (result.trade.status === 'accepted') toast('Trade accepted! The players are on your bench.');
+      else if (result.trade.status === 'declined') toast('The CPU manager turned it down. Try offering more.');
+      else toast('Offer sent. They can accept it from their Trades tab.');
+      render();
+    });
+  },
+  'trade-yes'(id) {
+    let problem = '';
+    mutate(lg => { problem = answerTrade(lg, id, true); return true; })
+      .then(() => toast(problem || 'Trade accepted! New players are on your bench.'));
+  },
+  'trade-no'(id) { mutate(lg => answerTrade(lg, id, false) === '', 'Offer declined.'); },
+  'trade-cancel'(id) {
+    mutate(lg => {
+      const t = lg.trades.find(x => x.id === id);
+      if (!t || t.status !== 'pending' || t.from !== userIdx(lg)) return false;
+      t.status = 'canceled'; t.doneAt = Date.now();
+    }, 'Offer canceled.');
+  },
+
+  /* ----- Commissioner tools ----- */
+  'set-inj'(val) {
+    const [pid, k] = val.split(':');
+    mutate(lg => {
+      if (!isCommish(lg)) return false;
+      if (k) lg.injuries[pid] = k; else delete lg.injuries[pid];
+    }, k ? `Marked ${PMAP.get(pid).name} as ${INJ_LABEL[k].toLowerCase()}.` : `${PMAP.get(pid).name} is healthy.`);
+  },
+  'toggle-waivers'() {
+    mutate(lg => { if (!isCommish(lg)) return false; lg.waivers = !lg.waivers; if (!lg.waivers) lg.claims = []; });
+  },
+
+  /* ----- Chat & alerts ----- */
+  'chat-send'() {
+    const lg = activeLeague();
+    const text = UI.chat.draft.trim();
+    if (!lg || !text) return;
+    UI.chat.draft = '';
+    const input = document.getElementById('chat-input');
+    if (input) { input.value = ''; input.focus(); }
+    Store.sendChat(lg.id, text).catch(err => { console.error(err); toast("Couldn't send. Check your connection."); });
+  },
+  'alerts-on'() {
+    if (!('Notification' in window)) return;
+    Notification.requestPermission().then(p => {
+      toast(p === 'granted' ? 'Alerts are on.' : 'Alerts are blocked. You can allow them in your browser settings.');
+      render();
+    });
   },
 
   /* ----- Season ----- */
@@ -1441,6 +1799,7 @@ document.addEventListener('input', e => {
   if (el.dataset.afield) { UI.auth[el.dataset.afield] = el.value; return; }
   if (el.dataset.jfield && UI.join) { UI.join[el.dataset.jfield] = el.value; return; }
   if (el.id === 'q') { UI.f.q = el.value; refreshList(); }
+  if (el.id === 'chat-input') { UI.chat.draft = el.value; }
 });
 document.addEventListener('change', e => {
   const el = e.target;
@@ -1450,6 +1809,7 @@ document.addEventListener('change', e => {
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && UI.modal) { UI.modal = null; render(); }
   if (e.key === 'Enter' && e.target && e.target.dataset && e.target.dataset.afield) actions['email-auth']();
+  if (e.key === 'Enter' && e.target && e.target.id === 'chat-input') { e.preventDefault(); actions['chat-send'](); }
 });
 window.addEventListener('hashchange', readInvite);
 
