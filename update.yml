@@ -1,0 +1,60 @@
+name: Update stats and publish
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 14 * * *"   # every day at 14:00 UTC (10 AM Eastern)
+  workflow_dispatch:        # adds a "Run workflow" button
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  update-and-publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Get the files
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Download players and stats
+        continue-on-error: true
+        env:
+          CFBD_API_KEY: ${{ secrets.CFBD_API_KEY }}
+        run: |
+          python fetch_players.py
+          python fetch_stats.py
+
+      - name: Save the new stats
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git add -A players.js stats.js || true
+          git diff --staged --quiet || git commit -m "Update players and stats"
+          git push
+
+      - name: Set up Pages
+        uses: actions/configure-pages@v5
+
+      - name: Package the site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+      - name: Publish the site
+        id: deployment
+        uses: actions/deploy-pages@v4
