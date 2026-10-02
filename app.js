@@ -322,6 +322,9 @@ function viewAuth() {
     <button class="btn btn-block btn-lg google-btn" data-act="google" ${s.busy ? 'disabled' : ''}>
       <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" stroke="none" d="M22 12.2c0-.7-.1-1.4-.2-2H12v3.8h5.6a4.8 4.8 0 0 1-2.1 3.1v2.6h3.4c2-1.8 3.1-4.5 3.1-7.5z"/><path fill="#34A853" stroke="none" d="M12 22c2.8 0 5.2-.9 6.9-2.5l-3.4-2.6c-.9.6-2.1 1-3.5 1-2.7 0-5-1.8-5.8-4.3H2.7v2.7A10 10 0 0 0 12 22z"/><path fill="#FBBC05" stroke="none" d="M6.2 13.6a6 6 0 0 1 0-3.8V7.1H2.7a10 10 0 0 0 0 9.2z"/><path fill="#EA4335" stroke="none" d="M12 6c1.5 0 2.9.5 4 1.5l3-3A10 10 0 0 0 2.7 7.1l3.5 2.7C7 7.8 9.3 6 12 6z"/></svg>
       Continue with Google</button>
+    ${typeof APP_CONFIG !== 'undefined' && APP_CONFIG.appleSignIn ? `<button class="btn btn-block btn-lg apple-btn" data-act="apple" ${s.busy ? 'disabled' : ''}>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" stroke="none" d="M16.37 12.6c-.02-2.2 1.8-3.26 1.88-3.31-1.03-1.5-2.62-1.7-3.18-1.73-1.35-.14-2.64.8-3.33.8-.69 0-1.74-.78-2.87-.76-1.47.02-2.83.86-3.59 2.18-1.53 2.66-.39 6.6 1.1 8.75.73 1.05 1.6 2.24 2.73 2.2 1.1-.05 1.51-.71 2.84-.71 1.32 0 1.7.71 2.86.69 1.18-.02 1.93-1.07 2.65-2.13.84-1.22 1.18-2.4 1.2-2.46-.03-.01-2.3-.88-2.32-3.5zM14.2 6.13c.6-.73 1.01-1.75.9-2.76-.87.04-1.92.58-2.54 1.31-.56.65-1.05 1.68-.92 2.67.97.08 1.96-.49 2.56-1.22z"/></svg>
+      Continue with Apple</button>` : ''}
     <div class="or"><span>or use email</span></div>
     <label class="field"><span>Email</span>
       <input id="a-email" class="input" type="email" autocomplete="email" data-afield="email" value="${esc(s.email)}"></label>
@@ -329,6 +332,7 @@ function viewAuth() {
       <input id="a-pw" class="input" type="password" autocomplete="${up ? 'new-password' : 'current-password'}" data-afield="pw" value="${esc(s.pw)}"></label>
     ${s.error ? `<div class="banner bad">${esc(s.error)}</div>` : ''}
     <button class="btn btn-primary btn-block btn-lg" data-act="email-auth" ${s.busy ? 'disabled' : ''}>${up ? 'Create account' : 'Sign in'}</button>
+    <p class="legal-line">By continuing, you agree to the <a href="terms.html" target="_blank" rel="noopener">Terms of Use</a>, including no tolerance for abusive or objectionable content, and the <a href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.</p>
     <div class="auth-links">
       <button class="link" data-act="auth-mode">${up ? 'Have an account? Sign in' : 'New here? Create an account'}</button>
       ${up ? '' : '<button class="link" data-act="reset-pw">Forgot password?</button>'}
@@ -1164,7 +1168,7 @@ function unreadCount(lg) {
   const c = UI.chat;
   if (!lg || c.id !== lg.id || !c.msgs) return 0;
   const seen = chatSeen(lg.id);
-  return c.msgs.filter(m => m.at > seen && m.uid !== ME_UID).length;
+  return visibleMsgs().filter(m => m.at > seen && m.uid !== ME_UID).length;
 }
 function watchChat(lg) {
   const c = UI.chat;
@@ -1179,19 +1183,45 @@ function watchChat(lg) {
     const prevLast = c.msgs.length ? c.msgs[c.msgs.length - 1].at : 0;
     c.msgs = msgs;
     const newest = msgs[msgs.length - 1];
-    if (!first && newest && newest.at > prevLast && newest.uid !== ME_UID) {
-      alertUser(`${newest.name}: ${newest.text}`, `chat-${newest.id}`);
+    if (!first && newest && newest.at > prevLast && newest.uid !== ME_UID && !isBlocked(newest.uid)) {
+      alertUser(`${newest.name}: ${maskText(newest.text)}`, `chat-${newest.id}`);
     }
     first = false;
     if (UI.tab === 'chat' && newest) markChatSeen(want, newest.at);
     if (UI.tab === 'chat') renderChatOnly(); else render();
   });
 }
+/* ---------- Chat safety ----------
+   Severe words (slurs, telling someone to hurt themselves) can't be sent.
+   Ordinary swear words get hidden with dots. */
+const SEVERE_WORDS = [/n+[i1!]+g+(?:a|er|uh)/i, /\bf+[a@4]+g+(?:[o0]+t+)?s?\b/i, /\bk+y+s+\b/i, /k+i+l+l+\s*(?:your|ur|yo)\s*self/i,
+  /\br+[e3]+t+[a@]+r+d/i, /\bch[i1]nks?\b/i, /\bsp[i1]cs?\b/i, /\bk[i1]kes?\b/i, /\btr[a@]nn(?:y|ies)\b/i];
+const MILD_WORDS = [/f+u+c+k+\w*/gi, /\bsh+[i1]+t+\w*/gi, /\bb[i1]+t+c+h+\w*/gi, /a+s+s+h+o+l+e+s?/gi, /\bd[i1]+c+k+(?:s|head|heads)?\b/gi,
+  /c+u+n+t+\w*/gi, /\bwh[o0]+r+e+s?\b/gi, /\bs+l+u+t+s?\b/gi, /\bpuss(?:y|ies)\b/gi, /\bbastards?\b/gi, /\bdumb\s*ass\b/gi, /\bmotherf\w*/gi];
+function isSevere(text) { return SEVERE_WORDS.some(r => r.test(text)); }
+function maskText(text) {
+  let out = text;
+  for (const r of MILD_WORDS) out = out.replace(r, w => w[0] + '•'.repeat(Math.max(1, w.length - 1)));
+  for (const r of SEVERE_WORDS) out = out.replace(new RegExp(r.source, 'gi'), w => '•'.repeat(w.length));
+  return out;
+}
+const HIDDEN_KEY = 'fcfb-hidden-msgs';
+function hiddenMsgs() { try { return JSON.parse(localStorage.getItem(HIDDEN_KEY + ':' + ME_UID) || '[]'); } catch (e) { return []; } }
+function hideMsg(id) {
+  try { const l = hiddenMsgs(); l.push(id); localStorage.setItem(HIDDEN_KEY + ':' + ME_UID, JSON.stringify(l.slice(-300))); } catch (e) { /* ignore */ }
+}
+function isBlocked(uid) { return (Store.blocked || []).some(b => b.uid === uid); }
+function visibleMsgs() {
+  const hidden = new Set(hiddenMsgs());
+  return (UI.chat.msgs || []).filter(m => !hidden.has(m.id) && !isBlocked(m.uid));
+}
+
 function chatMessages(lg) {
   const c = UI.chat;
-  if (!c.msgs.length) return `<div class="chat-empty">No messages yet. Start the trash talk.</div>`;
+  const msgs = visibleMsgs();
+  if (!msgs.length) return `<div class="chat-empty">No messages yet. Start the trash talk.<br><small>Keep it fun. Tap any message to report it or block someone.</small></div>`;
   let lastDay = '';
-  return c.msgs.map(m => {
+  return msgs.map(m => {
     const mine = m.uid === ME_UID;
     const d = new Date(m.at);
     const day = d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
@@ -1199,7 +1229,7 @@ function chatMessages(lg) {
     lastDay = day;
     return `${sep}<div class="msg ${mine ? 'mine' : ''}">
       ${mine ? '' : `<div class="msg-name">${esc(m.name || 'Friend')}</div>`}
-      <div class="bubble">${esc(m.text)}</div>
+      <button class="bubble" data-act="msg" data-id="${esc(m.id)}">${esc(maskText(m.text))}</button>
       <div class="msg-time">${d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</div></div>`;
   }).join('');
 }
@@ -1266,8 +1296,11 @@ function helpModal() {
     ${sec('🔁', 'Trades', 'In League, then Trades, propose a swap. Friends accept or decline. CPU teams answer right away and only take fair deals.')}
     ${sec('📝', 'Waivers', 'In friend leagues, adding a free agent is a claim. Claims run daily at 4 AM Eastern, and the team lowest in the standings gets first choice.')}
     ${sec('🏆', 'Playoffs', 'After Week 12, the top 4 teams play a semifinal and a championship.')}
+    ${sec('🛡️', 'Play nice', 'Chat is for friendly trash talk. Tap any message to report it or block someone. Abusive messages can get you removed.')}
+    <p class="muted small center"><a class="link" href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a> · <a class="link" href="terms.html" target="_blank" rel="noopener">Terms of Use</a>${supportEmail() ? ` · <a class="link" href="mailto:${esc(supportEmail())}">Support</a>` : ''}</p>
     <button class="btn btn-primary btn-block" data-act="close-modal">Got it</button>`;
 }
+function supportEmail() { return (typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.supportEmail) || ''; }
 function maybeShowHelp() {
   const key = 'fcfb-help-seen:' + ME_UID;
   try {
@@ -1353,10 +1386,45 @@ function viewModal(lg) {
   } else if (m.type === 'account') {
     const canNotify = 'Notification' in window;
     const notifyOn = canNotify && Notification.permission === 'granted';
-    inner = `<h3 class="m-h">Account</h3><p class="muted">Signed in as <b>${esc(Store.user ? (Store.user.email || Store.displayName()) : '')}</b></p>
+    const support = supportEmail();
+    const blocked = Store.blocked || [];
+    inner = `<h3 class="m-h">Account</h3><p class="muted">Signed in as <b>${esc(Store.user ? (Store.user.email || 'Apple ID') : '')}</b></p>
+      <label class="field"><span>Your name (friends see this)</span>
+        <div class="invite-row"><input id="acct-name" class="input" maxlength="24" data-afield2="name" value="${esc(UI.acctName != null ? UI.acctName : Store.displayName())}">
+        <button class="btn btn-primary" data-act="save-name">Save</button></div></label>
       ${canNotify ? `<div class="banner info"><span>${notifyOn ? 'Alerts are on. You\'ll get a pop-up for your draft picks, trade offers, and chat while FCFB is open.' : 'Get a pop-up when it\'s your pick, someone sends a trade, or a friend chats, while FCFB is open in a tab.'}</span>
         ${notifyOn ? '' : '<button class="btn btn-sm btn-primary" data-act="alerts-on">Turn on</button>'}</div>` : ''}
-      <div class="m-actions"><button class="btn" data-act="help">How to play</button><button class="btn btn-danger" data-act="signout">Sign out</button></div>`;
+      ${blocked.length ? `<div class="tr-label">Blocked people</div><div class="m-list">${blocked.map(b => `<div class="mgr"><span>${esc(b.name || 'Player')}</span><button class="btn btn-sm" data-act="unblock" data-id="${esc(b.uid)}">Unblock</button></div>`).join('')}</div>` : ''}
+      <div class="acct-links">
+        <button class="link" data-act="help">How to play</button>
+        <a class="link" href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a>
+        <a class="link" href="terms.html" target="_blank" rel="noopener">Terms of Use</a>
+        ${support ? `<a class="link" href="mailto:${esc(support)}?subject=FCFB%20support">Contact support</a>` : ''}
+      </div>
+      <div class="m-actions"><button class="btn" data-act="signout">Sign out</button><button class="btn btn-danger" data-act="delete-account">Delete account</button></div>`;
+  } else if (m.type === 'delete-account') {
+    const recent = Store.signedInRecently();
+    inner = `<h3 class="m-h">Delete your account?</h3>
+      <p class="muted">This permanently deletes your FCFB account and your chat messages, and removes you from every league. CPU managers take over your teams. If you're a commissioner, another member becomes commissioner. Leagues with only you in them are deleted.</p>
+      ${recent ? `<div class="m-actions"><button class="btn" data-act="close-modal">Keep account</button>
+        <button class="btn btn-danger" data-act="confirm-delete-account" ${UI.deleting ? 'disabled' : ''}>${UI.deleting ? 'Deleting…' : 'Delete forever'}</button></div>`
+      : `<div class="banner info"><span>For your security, sign in again first. Then come back here and tap Delete account.</span></div>
+        <div class="m-actions"><button class="btn" data-act="close-modal">Cancel</button><button class="btn btn-primary" data-act="reauth">Sign in again</button></div>`}`;
+  } else if (m.type === 'msg') {
+    const msg = (UI.chat.msgs || []).find(x => x.id === m.id);
+    const lgc = activeLeague();
+    if (!msg) { inner = '<p class="muted">That message is gone.</p>'; }
+    else {
+      const mine = msg.uid === ME_UID;
+      const canDelete = mine || (lgc && isCommish(lgc));
+      inner = `<h3 class="m-h">${mine ? 'Your message' : esc(msg.name || 'Message')}</h3>
+        <div class="bubble quoted">${esc(maskText(msg.text))}</div>
+        <div class="msg-actions">
+          ${mine ? '' : `<button class="btn btn-block" data-act="report-msg" data-id="${esc(msg.id)}">Report message</button>
+            <button class="btn btn-block" data-act="block-user" data-id="${esc(msg.id)}">Block ${esc(msg.name || 'this person')}</button>`}
+          ${canDelete ? `<button class="btn btn-block btn-danger" data-act="delete-msg" data-id="${esc(msg.id)}">Delete message${!mine ? ' (commissioner)' : ''}</button>` : ''}
+        </div>`;
+    }
   } else if (m.type === 'leave') {
     inner = `<h3 class="m-h">Leave this league?</h3><p class="muted">A CPU manager takes over your team. You can rejoin later with an invite link if a spot is open.</p>
       <div class="m-actions"><button class="btn" data-act="close-modal">Stay</button><button class="btn btn-danger" data-act="confirm-leave">Leave league</button></div>`;
@@ -1545,6 +1613,11 @@ const actions = {
   },
 
   /* ----- Sign in ----- */
+  apple() {
+    UI.auth.error = ''; UI.auth.busy = true; render();
+    Store.signInApple().catch(err => { UI.auth.error = authError(err); })
+      .finally(() => { UI.auth.busy = false; render(); });
+  },
   google() {
     UI.auth.error = ''; UI.auth.busy = true; render();
     Store.signInGoogle().catch(err => { UI.auth.error = authError(err); })
@@ -1565,8 +1638,79 @@ const actions = {
       .then(() => toast('Check your email for a link to reset your password.'))
       .catch(err => { UI.auth.error = authError(err); render(); });
   },
-  account() { UI.modal = { type: 'account' }; render(); },
+  account() { UI.acctName = null; UI.modal = { type: 'account' }; render(); },
   'news-more'() { UI.newsAll = !UI.newsAll; render(); },
+
+  /* ----- Account ----- */
+  'save-name'() {
+    const name = (UI.acctName != null ? UI.acctName : Store.displayName()).trim().slice(0, 24);
+    if (!name) { toast('Type a name first.'); return; }
+    if (isSevere(name) || maskText(name) !== name) { toast('Pick a different name.'); return; }
+    Store.setDisplayName(name).then(async () => {
+      UI.acctName = null;
+      // Show the new name in every league you're in.
+      for (const lg of Store.list()) {
+        await Store.update(lg.id, fresh => {
+          const t = fresh.teams.find(x => x.ownerUid === ME_UID);
+          if (!t || t.ownerName === name) return false;
+          t.ownerName = name;
+        }).catch(() => {});
+      }
+      toast('Name saved.');
+    }).catch(() => toast("Couldn't save your name. Try again."));
+  },
+  unblock(uidToFree) {
+    Store.saveBlocked((Store.blocked || []).filter(b => b.uid !== uidToFree)).then(() => toast('Unblocked.'));
+  },
+  'delete-account'() { UI.modal = { type: 'delete-account' }; render(); },
+  reauth() { UI.modal = null; Store.signOut(); toast('Sign in again, then open your account to delete it.'); },
+  'confirm-delete-account'() {
+    if (UI.deleting) return;
+    UI.deleting = true; render();
+    Store.deleteAccount().then(() => {
+      UI.deleting = false; UI.modal = null; UI.leagueId = null; UI.view = 'home';
+      toast('Your account was deleted.');
+      render();
+    }).catch(err => {
+      console.error(err);
+      UI.deleting = false;
+      if (err && err.code === 'auth/requires-recent-login') {
+        UI.modal = null; Store.signOut(); toast('For your security, sign in again, then delete your account.');
+      } else {
+        toast("Something went wrong deleting your account. Try again, or contact support.");
+      }
+      render();
+    });
+  },
+
+  /* ----- Chat safety ----- */
+  msg(id) { UI.modal = { type: 'msg', id }; render(); },
+  'report-msg'(id) {
+    const msg = (UI.chat.msgs || []).find(x => x.id === id);
+    const lg = activeLeague();
+    if (!msg || !lg) return;
+    UI.modal = null;
+    hideMsg(id);
+    Store.report({ type: 'chat', leagueId: lg.id, leagueName: lg.name, messageId: id, text: msg.text.slice(0, 500), reportedUid: msg.uid, reportedName: msg.name || '' })
+      .then(() => toast('Thanks for reporting. The message is hidden for you, and it will be reviewed.'))
+      .catch(() => toast("Couldn't send the report. Try again."));
+    render();
+  },
+  'block-user'(id) {
+    const msg = (UI.chat.msgs || []).find(x => x.id === id);
+    if (!msg) return;
+    UI.modal = null;
+    const list = (Store.blocked || []).filter(b => b.uid !== msg.uid).concat([{ uid: msg.uid, name: msg.name || 'Player' }]);
+    Store.saveBlocked(list).then(() => toast(`Blocked ${msg.name || 'that person'}. You won't see their messages. Unblock anytime in your account.`))
+      .catch(() => toast("Couldn't block right now. Try again."));
+    render();
+  },
+  'delete-msg'(id) {
+    const lg = activeLeague();
+    UI.modal = null;
+    Store.deleteChatMessage(lg.id, id).then(() => toast('Message deleted.')).catch(() => toast("Couldn't delete that message."));
+    render();
+  },
   help() { UI.modal = { type: 'help' }; render(); },
   'team-color'(id) { const lg = activeLeague(); editState(lg).color = +id; render(); },
   'team-emoji'(id) { const lg = activeLeague(); editState(lg).emoji = id; render(); },
@@ -1851,6 +1995,7 @@ const actions = {
     const lg = activeLeague();
     const text = UI.chat.draft.trim();
     if (!lg || !text) return;
+    if (isSevere(text)) { toast("That message breaks the chat rules, so it wasn't sent."); return; }
     UI.chat.draft = '';
     const input = document.getElementById('chat-input');
     if (input) { input.value = ''; input.focus(); }
@@ -1976,6 +2121,7 @@ document.addEventListener('input', e => {
   if (el.id === 'q') { UI.f.q = el.value; refreshList(); }
   if (el.id === 'chat-input') { UI.chat.draft = el.value; }
   if (el.dataset.efield && UI.edit) { UI.edit[el.dataset.efield] = el.value; }
+  if (el.dataset.afield2 === 'name') { UI.acctName = el.value; }
 });
 document.addEventListener('change', e => {
   const el = e.target;

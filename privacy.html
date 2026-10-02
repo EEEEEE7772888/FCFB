@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>FCFB Privacy Policy</title>
+  <link rel="icon" type="image/svg+xml" href="logo.svg">
+  <link rel="stylesheet" href="legal.css">
+</head>
+<body>
+<main>
+  <div class="top"><img src="logo.svg" alt="FCFB logo"><a href="./">Back to FCFB</a></div>
+  <h1>Privacy Policy</h1>
+  <p class="date">Last updated: October 1, 2026</p>
+
+  <div class="box"><p><b>The short version:</b> FCFB only collects what it needs to run your fantasy leagues. We don't sell your information, we don't show ads, and we don't track you across other apps or websites. You can delete your account and your chat messages anytime from inside the app.</p></div>
+
+  <h2>What we collect</h2>
+  <ul>
+    <li><b>Account info:</b> your email address, the name you choose to show friends, and how you sign in (Google, Apple, or email and password). If you use Sign in with Apple and choose to hide your email, we only get Apple's private relay address.</li>
+    <li><b>League info:</b> your team name, team color and icon, players, lineups, trades, waiver claims, and game results.</li>
+    <li><b>Chat messages</b> you send in league chats.</li>
+    <li><b>Reports</b> you send about messages, including the reported message, and the list of people you've blocked.</li>
+    <li><b>Settings saved on your device,</b> like which chat messages you've already read. These stay in your browser or app and aren't sent to us.</li>
+  </ul>
+  <p>We do <b>not</b> collect your location, contacts, photos, payment information, or advertising identifiers.</p>
+
+  <h2>How we use it</h2>
+  <ul>
+    <li>To sign you in and keep your leagues on all your devices.</li>
+    <li>To run leagues with your friends: drafts, scoring, trades, waivers, and chat.</li>
+    <li>To keep chat safe by reviewing reports and removing abusive content.</li>
+    <li>To answer you if you contact support.</li>
+  </ul>
+
+  <h2>Who can see it</h2>
+  <ul>
+    <li><b>People in your leagues</b> can see your display name, team name, team icon, players, results, trades, and the chat messages you send in that league.</li>
+    <li><b>FCFB's operator</b> can see account and league data when needed to run the app, fix problems, or review reports.</li>
+    <li><b>We never sell or rent your information,</b> and we don't share it with advertisers.</li>
+  </ul>
+
+  <h2>Services FCFB uses</h2>
+  <ul>
+    <li><b>Google Firebase</b> handles sign-in and stores account and league data.</li>
+    <li><b>GitHub Pages</b> hosts the FCFB website and may log basic technical info like IP addresses, as most websites do.</li>
+    <li><b>Google Fonts</b> provides the app's font, which means your device connects to Google to download it.</li>
+    <li><b>CollegeFootballData.com</b> provides player stats. No personal information is sent to it.</li>
+    <li><b>News sites:</b> when you tap a headline, you leave FCFB, and that site's own privacy policy applies.</li>
+  </ul>
+
+  <h2>Keeping and deleting your information</h2>
+  <p>We keep your information while you have an account. To delete everything, open FCFB, tap your initial in the top right, then <b>Delete account</b>. This deletes your account, your private settings, and your chat messages, and removes you from every league. CPU managers take over your teams, so team names and past results may stay in your friends' leagues without your name or email attached. Leagues where you were the only member are deleted. We may keep reports about abusive messages for a limited time to keep the community safe.</p>
+
+  <h2>Children</h2>
+  <p>FCFB isn't meant for children under 13, and we don't knowingly collect information from them. If you believe a child under 13 has created an account, contact us and we'll delete it.</p>
+
+  <h2>Security</h2>
+  <p>Data travels over encrypted connections and is protected by access rules, so only league members can read their league's chat. No system is perfectly secure, so please use a strong password.</p>
+
+  <h2>Changes</h2>
+  <p>If this policy changes, we'll update the date at the top. Big changes will be announced in the app.</p>
+
+  <h2>Contact</h2>
+  <p id="contact">Questions or deletion requests: use the Contact support link in the FCFB app.</p>
+</main>
+<script src="app-config.js"></script>
+<script>
+  if (typeof APP_CONFIG !== 'undefined' && APP_CONFIG.supportEmail) {
+    var e = APP_CONFIG.supportEmail;
+    document.getElementById('contact').innerHTML = 'Questions or deletion requests: email <a href="mailto:' + e + '">' + e + '</a>.';
+  }
+</script>
+</body>
+</html>

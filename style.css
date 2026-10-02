@@ -635,3 +635,19 @@ body.saving .topbar::after {
 .chart .ch-proj { stroke: var(--gold); stroke-width: 1.5; stroke-dasharray: 4 4; }
 .chart .ch-bar { fill: rgba(61, 139, 255, .38); }
 .chart .ch-good { fill: var(--accent); }
+
+/* ---------- Sign in with Apple, legal, account ---------- */
+.apple-btn { background: #fff; color: #000; gap: 8px; margin-top: 10px; }
+.apple-btn svg { width: 20px; height: 20px; margin-top: -2px; }
+.legal-line { font-size: 12.5px; color: var(--muted); line-height: 1.45; margin: 14px 2px 0; text-align: center; }
+.legal-line a { color: var(--accent); }
+.acct-links { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 16px 0 4px; }
+.acct-links a { text-decoration: none; }
+
+/* ---------- Chat safety ---------- */
+button.bubble { text-align: left; cursor: pointer; color: inherit; font: inherit; }
+.msg.mine button.bubble { color: #fff; }
+.bubble.quoted { margin: 6px 0 16px; display: inline-block; max-width: 100%; }
+.msg-actions { display: flex; flex-direction: column; gap: 8px; }
+.msg-actions .btn-block { margin-top: 0; }
+.chat-empty small { display: block; margin-top: 8px; color: var(--faint); }

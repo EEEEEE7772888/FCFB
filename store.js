@@ -40,8 +40,10 @@ const Store = {
       if (user) {
         ME_UID = user.uid;
         this._listen();
+        this.loadProfile();
       } else {
         ME_UID = 'signed-out';
+        this.blocked = [];
       }
       this.onChange();
     });
@@ -56,6 +58,20 @@ const Store = {
   /* ---------- Auth ---------- */
   signInGoogle() {
     return this.auth.signInWithPopup(new firebase.auth.GoogleAuthProvider());
+  },
+  signInApple() {
+    const provider = new firebase.auth.OAuthProvider('apple.com');
+    provider.addScope('email');
+    provider.addScope('name');
+    return this.auth.signInWithPopup(provider);
+  },
+  setDisplayName(name) {
+    return this.user.updateProfile({ displayName: name }).then(() => this.onChange());
+  },
+  // Firebase only lets you delete an account soon after signing in.
+  signedInRecently() {
+    const t = this.user && this.user.metadata && Date.parse(this.user.metadata.lastSignInTime);
+    return !!t && Date.now() - t < 4 * 60 * 1000;
   },
   signInEmail(email, pw) { return this.auth.signInWithEmailAndPassword(email, pw); },
   signUpEmail(email, pw) { return this.auth.createUserWithEmailAndPassword(email, pw); },
@@ -127,6 +143,52 @@ const Store = {
     return this.db.collection('leagues').doc(leagueId).collection('messages').add({
       uid: ME_UID, name: this.displayName(), text: clean, at: Date.now(),
     }).then(() => true);
+  },
+
+  deleteChatMessage(leagueId, messageId) {
+    return this.db.collection('leagues').doc(leagueId).collection('messages').doc(messageId).delete();
+  },
+  async deleteMyMessages(leagueId) {
+    if (this.mode !== 'cloud') return;
+    const snap = await this.db.collection('leagues').doc(leagueId).collection('messages').where('uid', '==', ME_UID).get();
+    const jobs = [];
+    snap.forEach(d => jobs.push(this.deleteChatMessage(leagueId, d.id)));
+    await Promise.all(jobs);
+  },
+  report(info) {
+    return this.db.collection('reports').add(Object.assign({ reporter: ME_UID, at: Date.now() }, info));
+  },
+
+  /* ---------- Your private settings (blocked people) ---------- */
+  blocked: [],
+  loadProfile() {
+    if (this.mode !== 'cloud' || !this.user) return Promise.resolve();
+    return this.db.collection('users').doc(ME_UID).get().then(snap => {
+      const d = snap.exists ? snap.data() : {};
+      this.blocked = Array.isArray(d.blocked) ? d.blocked : [];
+      this.onChange();
+    }).catch(err => console.error(err));
+  },
+  saveBlocked(list) {
+    this.blocked = list.slice(0, 200);
+    this.onChange();
+    return this.db.collection('users').doc(ME_UID).set({ blocked: this.blocked });
+  },
+  async deleteAccount() {
+    const uid = ME_UID;
+    for (const lg of this.list()) {
+      try { await this.deleteMyMessages(lg.id); } catch (e) { console.error(e); }
+      if (lg.commissioner === uid && lg.memberUids.length <= 1) { await this.remove(lg.id); continue; }
+      await this.update(lg.id, fresh => {
+        if (fresh.commissioner === uid) fresh.commissioner = fresh.memberUids.find(u => u !== uid) || uid;
+        leaveLeague(fresh, uid);
+      });
+    }
+    try { await this.db.collection('users').doc(uid).delete(); } catch (e) { console.error(e); }
+    await this.user.delete();
+    try {
+      Object.keys(localStorage).filter(k => k.includes(uid)).forEach(k => localStorage.removeItem(k));
+    } catch (e) { /* ignore */ }
   },
 
   /* Leagues saved in this browser before accounts existed. */
