@@ -1991,6 +1991,23 @@ window.addEventListener('hashchange', readInvite);
 window.addEventListener('online', () => { toast('Back online.'); render(); });
 window.addEventListener('offline', () => render());
 
+/* ---------- Make sure the styles loaded ----------
+   If a phone failed to download style.css (or kept a bad copy), fetch it
+   again so the app never shows up unstyled. */
+function stylesLoaded() {
+  return getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() !== '';
+}
+function ensureStyles(attempt = 0) {
+  if (stylesLoaded() || attempt > 3) return;
+  const old = document.querySelector('link[rel="stylesheet"][href^="style.css"]');
+  const link = document.createElement('link');
+  link.rel = 'stylesheet';
+  link.href = 'style.css?retry=' + Date.now();
+  link.onload = () => { if (old) old.remove(); };
+  document.head.appendChild(link);
+  setTimeout(() => ensureStyles(attempt + 1), 2500);
+}
+
 /* ---------- Boot ---------- */
 (function boot() {
   let wasSignedIn = null;
@@ -2007,6 +2024,8 @@ window.addEventListener('offline', () => render());
     render();
     setTimeout(autoScore, 500);
   };
+  ensureStyles();
+  setTimeout(ensureStyles, 1500);
   Store.init();
   readInvite();
   render();
