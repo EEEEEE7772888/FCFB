@@ -9,9 +9,9 @@ PLIST="$APP_DIR/Info.plist"
 PB=/usr/libexec/PlistBuddy
 
 echo "== App icon and launch screen"
-for f in "$APP_DIR"/Assets.xcassets/AppIcon.appiconset/*.png; do cp resources/icon-1024.png "$f"; done
+for f in "$APP_DIR"/Assets.xcassets/AppIcon.appiconset/*.png; do cp icon-1024.png "$f"; done
 if [ -d "$APP_DIR/Assets.xcassets/Splash.imageset" ]; then
-  for f in "$APP_DIR"/Assets.xcassets/Splash.imageset/*.png; do cp resources/splash-2732.png "$f"; done
+  for f in "$APP_DIR"/Assets.xcassets/Splash.imageset/*.png; do cp splash-2732.png "$f"; done
 fi
 
 echo "== Info.plist"
@@ -24,7 +24,7 @@ $PB -c "Delete :UISupportedInterfaceOrientations~ipad" "$PLIST" 2>/dev/null || t
 
 echo "== Google sign-in (GoogleService-Info.plist)"
 if [ ! -f GoogleService-Info.plist ]; then
-  echo "ERROR: ios-app/GoogleService-Info.plist is missing. Download it from Firebase (Project settings, your iOS app) and upload it to the ios-app folder on GitHub."
+  echo "ERROR: GoogleService-Info.plist is missing. Download it from Firebase (Project settings, your iOS app) and upload it to the main file list on GitHub."
   exit 1
 fi
 cp GoogleService-Info.plist "$APP_DIR/"

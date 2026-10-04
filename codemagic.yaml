@@ -19,31 +19,27 @@ workflows:
       cocoapods: default
     scripts:
       - name: Install Capacitor
-        script: |
-          cd ios-app
-          npm install
+        script: npm install
       - name: Create the iOS project
         script: |
-          cd ios-app
-          rm -rf ios
+          rm -rf ios native-www
+          mkdir native-www
+          cp offline.html native-www/offline.html
+          printf '<!DOCTYPE html><meta http-equiv="refresh" content="0; url=https://eeeeee7772888.github.io/FCFB/">' > native-www/index.html
           npx cap add ios
       - name: Add FCFB icon, sign-in, and settings
-        script: |
-          cd ios-app
-          bash configure-ios.sh
+        script: bash configure-ios.sh
       - name: Install iOS libraries
-        script: |
-          cd ios-app
-          npx cap sync ios
+        script: npx cap sync ios
       - name: Set up code signing
         script: xcode-project use-profiles
       - name: Set build number
         script: |
-          cd ios-app/ios/App
+          cd ios/App
           agvtool new-version -all $BUILD_NUMBER
       - name: Build the app
         script: |
-          xcode-project build-ipa --workspace ios-app/ios/App/App.xcworkspace --scheme App
+          xcode-project build-ipa --workspace ios/App/App.xcworkspace --scheme App
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
