@@ -352,6 +352,7 @@ function authError(err) {
     'auth/too-many-requests': 'Too many tries. Wait a minute and try again.',
     'auth/popup-blocked': 'Your browser blocked the Google window. Allow pop-ups, or use email.',
     'auth/popup-closed-by-user': '',
+    'auth/native-missing': 'This sign-in option needs the latest FCFB app. Use email for now.',
     'auth/cancelled-popup-request': '',
     'auth/unauthorized-domain': 'This website isn\'t on Firebase\'s approved list yet. Add it under Authentication, Settings, Authorized domains.',
     'auth/operation-not-allowed': 'That sign-in method isn\'t turned on in Firebase yet.',
@@ -507,7 +508,7 @@ function inviteCard(lg) {
     <h3 class="card-h">Invite friends</h3>
     <p class="muted small">${lg.phase === 'lobby' ? `${open} open spot${open === 1 ? '' : 's'}. Send this link to friends.` : 'Friends who join now take over a CPU team.'}</p>
     <div class="invite-row"><input id="invite-link" class="input" readonly value="${esc(inviteLink(lg))}">
-      <button class="btn btn-primary" data-act="copy-invite">${navigator.share ? 'Share' : 'Copy'}</button></div>
+      <button class="btn btn-primary" data-act="copy-invite">${Native.canShare() ? 'Share' : 'Copy'}</button></div>
   </div>`;
 }
 function viewLobby(lg) {
@@ -1356,6 +1357,7 @@ function celebrate(lg, w, won, mine, theirs) {
   const key = `fcfb-cele:${ME_UID}:${lg.id}:${w}`;
   try { if (localStorage.getItem(key)) return; localStorage.setItem(key, '1'); } catch (e) { return; }
   if (!won) return;
+  Native.success();
   const box = document.createElement('div');
   box.className = 'confetti';
   const colors = ['#f6bd3a', '#3d8bff', '#2fd27a', '#ff5d5d', '#c08cff', '#ffffff'];
@@ -1780,8 +1782,8 @@ const actions = {
   'copy-invite'() {
     const lg = activeLeague();
     const link = inviteLink(lg);
-    if (navigator.share) {
-      navigator.share({ title: lg.name, text: `Join my college fantasy football league, ${lg.name}!`, url: link }).catch(() => {});
+    if (Native.canShare()) {
+      Native.share({ title: lg.name, text: `Join my college fantasy football league, ${lg.name}!`, url: link }).catch(() => {});
       return;
     }
     const done = () => toast('Invite link copied. Paste it to your friends.');
@@ -1828,6 +1830,7 @@ const actions = {
   dtab(id) { UI.dtab = id; render(); },
   fpos(id) { UI.f.pos = id; render(); },
   draft(id) {
+    Native.tap('MEDIUM');
     const p = PMAP.get(id);
     UI.modal = null;
     mutate(lg => onClock(lg) === userIdx(lg) && makePick(lg, id), `You drafted ${p.name}.`).then(afterPick);
@@ -1862,6 +1865,7 @@ const actions = {
   move(id) { UI.move = id; render(); },
   'move-cancel'() { UI.move = null; render(); },
   'move-to'(id) {
+    Native.tap('LIGHT');
     const mv = UI.move;
     UI.move = null;
     mutate(lg => {
@@ -1878,6 +1882,7 @@ const actions = {
       'Lineup set to your best projected starters.');
   },
   add(id) {
+    Native.tap('LIGHT');
     const lg = activeLeague();
     const t = lg.teams[userIdx(lg)];
     if (!t || ownerMap(lg).has(id)) return;
@@ -1949,6 +1954,7 @@ const actions = {
   'trade-give'(pid) { const s = UI.trade.give; s.includes(pid) ? s.splice(s.indexOf(pid), 1) : s.push(pid); render(); },
   'trade-get'(pid) { const s = UI.trade.get; s.includes(pid) ? s.splice(s.indexOf(pid), 1) : s.push(pid); render(); },
   'trade-send'() {
+    Native.tap('MEDIUM');
     const s = UI.trade;
     let result = null;
     UI.modal = null;
@@ -1965,6 +1971,7 @@ const actions = {
     });
   },
   'trade-yes'(id) {
+    Native.success();
     let problem = '';
     mutate(lg => { problem = answerTrade(lg, id, true); return true; })
       .then(() => toast(problem || 'Trade accepted! New players are on your bench.'));
@@ -2172,6 +2179,7 @@ function ensureStyles(attempt = 0) {
   };
   ensureStyles();
   setTimeout(ensureStyles, 1500);
+  Native.setup();
   Store.init();
   readInvite();
   render();

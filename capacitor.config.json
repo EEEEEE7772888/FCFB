@@ -1,0 +1,20 @@
+{
+  "appId": "com.Amra.fcfb",
+  "appName": "FCFB",
+  "webDir": "www",
+  "server": {
+    "url": "https://eeeeee7772888.github.io/FCFB/",
+    "errorPath": "offline.html"
+  },
+  "ios": {
+    "contentInset": "never",
+    "backgroundColor": "#0b0d10",
+    "scrollEnabled": true
+  },
+  "plugins": {
+    "FirebaseAuthentication": {
+      "skipNativeAuth": true,
+      "providers": ["apple.com", "google.com"]
+    }
+  }
+}

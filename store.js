@@ -1,3 +1,40 @@
+/* ---------- iPhone app helpers ----------
+   When FCFB runs inside the App Store app, Capacitor adds window.Capacitor.
+   On the website these all quietly do nothing. */
+const Native = {
+  is() {
+    try { return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()); }
+    catch (e) { return false; }
+  },
+  plugin(name) {
+    if (!this.is()) return null;
+    const C = window.Capacitor;
+    try { return (C.Plugins && C.Plugins[name]) || (C.registerPlugin ? C.registerPlugin(name) : null); }
+    catch (e) { return null; }
+  },
+  // Little vibrations: 'LIGHT', 'MEDIUM', or 'HEAVY'.
+  tap(style = 'LIGHT') {
+    const h = this.plugin('Haptics');
+    if (h) Promise.resolve(h.impact({ style })).catch(() => {});
+  },
+  success() {
+    const h = this.plugin('Haptics');
+    if (h) Promise.resolve(h.notification({ type: 'SUCCESS' })).catch(() => {});
+  },
+  canShare() { return !!this.plugin('Share') || !!navigator.share; },
+  share(opts) {
+    const sh = this.plugin('Share');
+    if (sh) return sh.share(opts);
+    if (navigator.share) return navigator.share(opts);
+    return Promise.reject(new Error('no share'));
+  },
+  setup() {
+    const sb = this.plugin('StatusBar');
+    if (sb) Promise.resolve(sb.setStyle({ style: 'DARK' })).catch(() => {}); // light text on our dark app
+    if (this.is()) document.documentElement.classList.add('native');
+  },
+};
+
 'use strict';
 /* =========================================================
    STORE — where leagues are saved.
@@ -56,14 +93,43 @@ const Store = {
   },
 
   /* ---------- Auth ---------- */
+  // In the iPhone app, pop-up windows don't work, so the phone's own
+  // Apple / Google sign-in runs and hands the result to Firebase.
   signInGoogle() {
+    if (Native.is()) return this._nativeSignIn('google');
     return this.auth.signInWithPopup(new firebase.auth.GoogleAuthProvider());
   },
   signInApple() {
+    if (Native.is()) return this._nativeSignIn('apple');
     const provider = new firebase.auth.OAuthProvider('apple.com');
     provider.addScope('email');
     provider.addScope('name');
     return this.auth.signInWithPopup(provider);
+  },
+  async _nativeSignIn(kind) {
+    const fa = Native.plugin('FirebaseAuthentication');
+    if (!fa) throw { code: 'auth/native-missing' };
+    let result, cred;
+    try {
+      if (kind === 'apple') {
+        result = await fa.signInWithApple({ skipNativeAuth: true, scopes: ['email', 'name'] });
+        cred = new firebase.auth.OAuthProvider('apple.com').credential({
+          idToken: result.credential.idToken, rawNonce: result.credential.nonce,
+        });
+      } else {
+        result = await fa.signInWithGoogle({ skipNativeAuth: true });
+        cred = firebase.auth.GoogleAuthProvider.credential(result.credential.idToken, result.credential.accessToken);
+      }
+    } catch (err) {
+      const msg = String((err && (err.message || err.code)) || '');
+      if (/cancel/i.test(msg) || msg === '1001') throw { code: 'auth/popup-closed-by-user' };
+      throw err;
+    }
+    const out = await this.auth.signInWithCredential(cred);
+    // Apple only shares your name the very first time, so save it right away.
+    const name = result.user && result.user.displayName;
+    if (name && out.user && !out.user.displayName) await out.user.updateProfile({ displayName: name }).catch(() => {});
+    return out;
   },
   setDisplayName(name) {
     return this.user.updateProfile({ displayName: name }).then(() => this.onChange());

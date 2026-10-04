@@ -1,0 +1,16 @@
+{
+  "name": "fcfb-ios",
+  "version": "1.0.0",
+  "private": true,
+  "description": "FCFB iPhone app (wraps the live FCFB website)",
+  "dependencies": {
+    "@capacitor/cli": "^7.0.0",
+    "@capacitor/core": "^7.0.0",
+    "@capacitor/ios": "^7.0.0",
+    "@capacitor/haptics": "^7.0.0",
+    "@capacitor/share": "^7.0.0",
+    "@capacitor/status-bar": "^7.0.0",
+    "@capacitor-firebase/authentication": "^7.0.0",
+    "firebase": "^11.0.0"
+  }
+}
