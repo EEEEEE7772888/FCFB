@@ -6,5 +6,5 @@ const APP_CONFIG = {
 
   // Turn this to true after Sign in with Apple is set up in Firebase
   // (that needs your Apple Developer account).
-  appleSignIn: false,
+  appleSignIn: true,
 };
