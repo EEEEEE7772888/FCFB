@@ -31,10 +31,10 @@ workflows:
         script: bash configure-ios.sh
       - name: Install iOS libraries
         script: |
-          npx cap sync ios || echo "First try failed, refreshing the library list and trying again"
-          cd ios/App
-          pod repo update
-          pod install --repo-update
+          # The first install (before Google sign-in was added) saved a lock file
+          # that pins old library versions. Remove it so everything is picked together.
+          rm -rf ios/App/Pods ios/App/Podfile.lock
+          npx cap sync ios || (cd ios/App && rm -rf Pods Podfile.lock && pod install --repo-update)
       - name: Set up code signing
         script: xcode-project use-profiles
       - name: Set build number
