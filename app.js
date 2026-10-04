@@ -172,7 +172,7 @@ function header(lg) {
   if (!lg) {
     return `<header class="topbar"><div class="topbar-in">
       <button class="brand" data-act="home" aria-label="Home">
-        <img class="brand-logo" src="logo.svg" alt=""><span class="brand-name">FCFB</span>
+        <img class="brand-logo" src="logo.svg?v=2" alt=""><span class="brand-name">FCFB</span>
       </button>
       ${Store.mode === 'cloud' && Store.user ? `<button class="tb-account" data-act="account" aria-label="Account">${esc((Store.displayName()[0] || '?').toUpperCase())}</button>` : ''}
     </div></header>`;
@@ -237,7 +237,7 @@ function viewHome() {
     <button class="btn btn-sm" data-act="import">Add to my account</button></div>` : ''}
   ${!Store.loaded ? `<div class="list-card">${[0, 1].map(() => `<div class="league-card skel"><span class="sk sk-av"></span><span class="lc-body"><span class="sk sk-line"></span><span class="sk sk-line short"></span></span></div>`).join('')}</div>`
     : cards ? `<div class="list-card">${cards}</div>` : `<div class="empty-card">
-    <img class="brand-logo big" src="logo.svg" alt="FCFB logo">
+    <img class="brand-logo big" src="logo.svg?v=2" alt="FCFB logo">
     <h3>Start your first league</h3>
     <p>Pick your conferences, draft real college players, and play against friends or CPU managers.</p>
     <button class="btn btn-primary btn-lg" data-act="new">Create a league</button></div>`}
@@ -314,7 +314,7 @@ function viewAuth() {
   const up = s.mode === 'signup';
   return `
   <section class="auth-hero">
-    <img class="brand-logo big" src="logo.svg" alt="FCFB logo">
+    <img class="brand-logo big" src="logo.svg?v=2" alt="FCFB logo">
     <h1>${joining ? 'You\'re invited' : 'FCFB'}</h1>
     <p>${joining ? 'Sign in to join your friend\'s league.' : 'College fantasy football. Sign in to keep your leagues on every device and play with friends.'}</p>
   </section>
@@ -1261,7 +1261,7 @@ function alertUser(text, key) {
   if (alerted.has(key)) return;
   alerted.add(key);
   if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
-    try { new Notification('FCFB', { body: text, icon: 'logo-192.png', tag: key }); } catch (e) { /* ignore */ }
+    try { new Notification('FCFB', { body: text, icon: 'logo-192.png?v=2', tag: key }); } catch (e) { /* ignore */ }
   }
 }
 function pendingAlerts() {

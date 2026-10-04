@@ -488,7 +488,7 @@ table { width: 100%; border-collapse: collapse; }
 .mv.locked svg { width: 18px; height: 18px; }
 
 .brand-logo { width: 32px; height: 32px; display: block; flex: none; }
-.brand-logo.big { width: 76px; height: 76px; margin: 0 auto 14px; filter: drop-shadow(0 6px 18px rgba(246, 189, 58, .25)); }
+.brand-logo.big { width: 76px; height: 76px; margin: 0 auto 14px; filter: drop-shadow(0 6px 18px rgba(31, 94, 255, .35)); }
 
 /* ---------- Badges ---------- */
 .bn { position: relative; }
