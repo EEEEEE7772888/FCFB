@@ -30,7 +30,11 @@ workflows:
       - name: Add FCFB icon, sign-in, and settings
         script: bash configure-ios.sh
       - name: Install iOS libraries
-        script: npx cap sync ios
+        script: |
+          npx cap sync ios || echo "First try failed, refreshing the library list and trying again"
+          cd ios/App
+          pod repo update
+          pod install --repo-update
       - name: Set up code signing
         script: xcode-project use-profiles
       - name: Set build number
