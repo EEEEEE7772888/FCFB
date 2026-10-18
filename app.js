@@ -603,11 +603,11 @@ function viewLobby(lg) {
 }
 
 /* ---------- Shared player pieces ---------- */
-function pmain(p, extra = '') {
+function pmain(p, extra = '', stat = '') {
   return `<button class="pmain" data-act="player" data-id="${p.id}">
     ${playerAvatar(p)}
     <span class="ptext"><span class="pname">${esc(p.pos === 'DST' ? p.team + ' D/ST' : p.name)}${injBadge(activeLeague(), p.id)}${trendBadge(activeLeague(), p)}</span>
-    <span class="pmeta">${posBadge(p.pos)}<span class="ellip">${esc(p.team)}${extra}</span></span></span>
+    <span class="pmeta">${posBadge(p.pos)}<span class="ellip">${esc(p.team)}${extra}</span></span>${stat}</span>
   </button>`;
 }
 function filterBar(lg, withSort) {
@@ -841,14 +841,23 @@ function viewTeam(lg) {
         : isT ? `<button class="mv here" data-act="move-to" data-id="${key}">Here</button>` : `<span class="mv ghost"></span>`;
       else btn = `<button class="mv" data-act="move" data-id="${key}">Move</button>`;
     }
-    const lastPts = p && lastW ? `, last ${fmt(weekPts(lg, p, lastW))}` : '';
+    // Under his name: this week's real stats once his game is over, a bye
+    // notice, or last week's line.
+    let stat = '';
+    if (p && !done) {
+      if (gameDone(lg, p, w)) stat = `<span class="pstat"><b>Wk ${w}</b> ${esc(statLine(lg, p, w))}</span>`;
+      else if (bye) stat = `<span class="pstat bye"><b>BYE</b> this week</span>`;
+      else if (lastW) stat = isBye(p, lastW) ? `<span class="pstat"><b>Wk ${lastW}</b> BYE</span>`
+        : `<span class="pstat"><b>Wk ${lastW}</b> ${esc(statLine(lg, p, lastW))} · ${fmt(weekPts(lg, p, lastW))} pts</span>`;
+    }
+    const upcomingBye = p && p.bye && p.bye > w && p.bye <= REG_WEEKS ? `, bye wk ${p.bye}` : '';
     const num = !p ? '' : done ? `<b>${fmt(seasonPts(lg, p))}</b><small>season</small>`
-      : bye ? `<b class="bye">Bye</b><small>wk ${w}</small>`
+      : bye ? `<b class="bye">BYE</b><small>wk ${w}</small>`
       : gameDone(lg, p, w) ? `<b>${fmt(weekPts(lg, p, w))}</b><small>pts</small>`
       : `<b>${fmt(weekProj(lg, p, w))}</b><small>proj</small>`;
     return `<div class="lrow ${isSel ? 'sel' : ''} ${mv && !isSel && !isT ? 'dim' : ''} ${slot !== 'BN' && (bye || !p || injuryOf(lg, pid) === 'O') ? 'warn' : ''}">
       <div class="slot">${posLabel(slot)}</div>
-      ${p ? pmain(p, `${p.bye ? `, bye ${p.bye}` : ''}${lastPts}`) : '<div class="pmain empty">Empty</div>'}
+      ${p ? pmain(p, upcomingBye, stat) : '<div class="pmain empty">Empty</div>'}
       <div class="pnum">${num}</div>${btn}</div>`;
   };
 
@@ -985,10 +994,10 @@ function matchCard(lg, g, w, played, me) {
     if (!p) return `<div class="mside ${side}"><div class="mp"><span class="mp-name empty">Empty</span></div><div class="mp-pts">0.0</div></div>`;
     const bye = isBye(p, w);
     const real = played || line.done;
-    const meta = real ? statLine(lg, p, w, line.pts) : bye ? 'Bye week' : `${posLabel(p.pos)}, ${p.team}`;
+    const meta = bye ? 'Bye week' : real ? statLine(lg, p, w, line.pts) : `${posLabel(p.pos)}, ${p.team}`;
     return `<div class="mside ${side} ${bye ? 'bye' : ''}">
       ${playerAvatar(p, 'sm')}<button class="mp" data-act="player" data-id="${p.id}"><span class="mp-name">${esc(shortName(p))}${injBadge(lg, p.id)}</span><span class="mp-meta">${esc(meta)}</span></button>
-      <div class="mp-pts ${real ? '' : 'proj'}">${bye ? '—' : fmt(line.pts)}</div></div>`;
+      <div class="mp-pts ${real ? '' : 'proj'} ${bye ? 'bye' : ''}">${bye ? 'BYE' : fmt(line.pts)}</div></div>`;
   };
   const rows = al.map((l, i) => `<div class="mrow">${cell(l, 'l')}<div class="mslot">${posLabel(l.slot)}</div>${cell(bl[i], 'r')}</div>`).join('');
   // Win chance from the projected gap (only before the week is scored).
@@ -1404,8 +1413,10 @@ function maybeShowHelp() {
 function trendOf(lg, p) {
   if (!lg || p.pos === 'DST' || p.pos === 'K') return '';
   const last = lastPlayedWeek(lg);
+  // Count this week too once his game is over.
+  const from = lg.phase !== 'done' && lg.week > last && gameDone(lg, p, lg.week) ? lg.week : last;
   const pts = [];
-  for (let w = last; w >= 1 && pts.length < 2; w--) if (!isBye(p, w)) pts.push(weekPts(lg, p, w));
+  for (let w = from; w >= 1 && pts.length < 2; w--) if (!isBye(p, w)) pts.push(weekPts(lg, p, w));
   if (pts.length < 2) return '';
   const avg = (pts[0] + pts[1]) / 2, proj = projPts(p, lg.scoring);
   if (proj < 3) return '';
@@ -1538,9 +1549,14 @@ function playerModal(lg, p) {
   const conf = CONF_MAP.get(p.conf);
   const last = lastPlayedWeek(lg);
   let log = '';
-  for (let w = 1; w <= last; w++) {
+  const cur = lg.week;
+  const liveNow = lg.phase !== 'done' && cur > last && (gameDone(lg, p, cur) || isBye(p, cur));
+  const upTo = liveNow ? cur : last;
+  for (let w = upTo; w >= 1; w--) {
     const pts = weekPts(lg, p, w);
-    log += `<tr><td>${w <= REG_WEEKS ? w : w === REG_WEEKS + 1 ? 'SF' : 'F'}</td><td class="ellip">${esc(statLine(lg, p, w, pts))}</td><td class="num"><b>${isBye(p, w) ? '—' : fmt(pts)}</b></td></tr>`;
+    const label = w <= REG_WEEKS ? w : w === REG_WEEKS + 1 ? 'SF' : 'F';
+    const now = liveNow && w === cur;
+    log += `<tr class="${now ? 'now' : ''}"><td>${label}${now ? '<small>now</small>' : ''}</td><td class="ellip">${esc(statLine(lg, p, w, pts))}</td><td class="num"><b>${isBye(p, w) ? 'BYE' : fmt(pts)}</b></td></tr>`;
   }
   let action = '';
   if (lg.phase === 'draft') {
@@ -1564,7 +1580,7 @@ function playerModal(lg, p) {
       <div><b>${fmt(projPts(p, lg.scoring))}</b><small>Proj per game</small></div>
       <div><b>${last ? fmt(seasonPts(lg, p)) : '—'}</b><small>Season pts</small></div>
       <div><b>${rankOf(lg, p.id) || '—'}</b><small>League rank</small></div>
-      <div><b>${p.bye ? 'Wk ' + p.bye : 'None'}</b><small>Bye</small></div>
+      <div><b>${p.bye ? 'Wk ' + p.bye : 'None'}</b><small>${p.bye && p.bye < cur ? 'Bye (done)' : 'Bye week'}</small></div>
     </div>
     <p class="muted small">${owner == null ? 'Free agent' : owner === me ? 'On your team' : `On ${esc(lg.teams[owner].name)}`}${inj ? ` · <b class="inj-text inj-${inj}">${INJ_LABEL[inj]}</b>` : ''}</p>
     ${injTools}

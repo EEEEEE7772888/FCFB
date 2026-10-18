@@ -476,13 +476,21 @@ function realPts(lg, p, week) {
 }
 function realStatLine(p, week) {
   const s = realLine(p, week);
-  if (!s) return 'No stats';
+  if (!s) return "Didn't play";
   if (p.pos === 'DST') return `${s[0]} pts allowed, ${s[1]} sacks, ${s[2]} INT${s[3] ? `, ${s[3]} TD` : ''}`;
-  const [py, ptd, int, ry, rtd, rec, recy, rectd, , fgm, xpm] = s;
-  if (p.pos === 'QB') return `${py} pass yds, ${ptd} TD, ${int} INT, ${ry} rush yds`;
-  if (p.pos === 'RB') return `${ry} rush yds, ${rtd + rectd} TD, ${rec} rec, ${recy} rec yds`;
+  const [py, ptd, int, ry, rtd, rec, recy, rectd, fum, fgm, xpm] = s;
   if (p.pos === 'K') return `${fgm} FG, ${xpm} XP`;
-  return `${rec} rec, ${recy} yds, ${rectd} TD`;
+  // Only the stats he actually had, in the order fans expect for his position.
+  // His main stats get short labels (a QB's "300 yds, 2 TD"); the rest say what they are.
+  const main = p.pos === 'QB' ? 'pass' : (p.pos === 'WR' || p.pos === 'TE') ? 'rec' : 'rush';
+  const lab = (kind, word) => kind === main ? word : `${kind} ${word}`;
+  const pass = [py && `${py} ${lab('pass', 'yds')}`, ptd && `${ptd} ${lab('pass', 'TD')}`, int && `${int} INT`];
+  const rush = [ry && `${ry} rush yds`, rtd && `${rtd} ${lab('rush', 'TD')}`];
+  const recv = [rec && `${rec} rec`, recy && `${recy} ${lab('rec', 'yds')}`, rectd && `${rectd} ${lab('rec', 'TD')}`];
+  const groups = p.pos === 'QB' ? [pass, rush, recv] : p.pos === 'RB' ? [rush, recv, pass] : [recv, rush, pass];
+  const parts = groups.flat().filter(Boolean);
+  if (fum) parts.push(`${fum} fum lost`);
+  return parts.length ? parts.join(', ') : "Didn't play";
 }
 
 function weekPts(lg, p, week) {

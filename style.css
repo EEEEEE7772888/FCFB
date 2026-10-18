@@ -726,3 +726,12 @@ button.bubble { text-align: left; cursor: pointer; color: inherit; font: inherit
   background: var(--accent-soft); color: #7fb2ff; }
 .lh-pill.live { background: rgba(47, 210, 122, .14); color: var(--win); }
 .lh-pill.gold { background: rgba(246, 189, 58, .16); color: var(--gold); }
+
+/* ---------- Stat line under each player's name ---------- */
+.pstat { display: block; font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+.pstat b { color: var(--text); font-weight: 700; margin-right: 3px; }
+.pstat.bye, .pstat.bye b { color: var(--gold); }
+.mp-pts.bye { color: var(--gold); font-size: 13px; font-weight: 800; }
+.glog tr.now td { background: var(--accent-soft); }
+.glog td small { display: block; font-size: 10px; font-weight: 700; color: var(--accent); text-transform: uppercase; }
+.pstat { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.35; }
