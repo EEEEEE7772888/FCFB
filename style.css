@@ -735,3 +735,14 @@ button.bubble { text-align: left; cursor: pointer; color: inherit; font: inherit
 .glog tr.now td { background: var(--accent-soft); }
 .glog td small { display: block; font-size: 10px; font-weight: 700; color: var(--accent); text-transform: uppercase; }
 .pstat { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.35; }
+
+/* ---------- Create league: who's playing ---------- */
+.who-pick { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+.who { display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; padding: 16px; border-radius: var(--r-lg);
+  background: var(--surface-2); border: 2px solid transparent; color: var(--text); min-height: 44px; }
+.who.on { border-color: var(--accent); background: var(--accent-soft); }
+.who svg { width: 30px; height: 30px; flex: none; fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; }
+.who b { display: block; font-size: 16px; }
+.who small { display: block; font-size: 13px; color: var(--muted); margin-top: 2px; }
+.who.small { padding: 12px 16px; }
+.who.small b { font-size: 15px; font-weight: 650; }

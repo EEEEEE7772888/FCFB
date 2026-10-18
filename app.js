@@ -64,7 +64,7 @@ function toast(msg) {
   toast._t = setTimeout(() => el.classList.remove('show'), 2600);
 }
 function newCreateState() {
-  return { name: 'Saturday League', teamName: 'My Team', size: 10, scoring: 'ppr', pointsFrom: HAS_REAL_STATS ? 'real' : 'sim', multi: false, draftType: 'live', pickSeconds: 90, confs: new Set(['SEC', 'BIG10', 'BIG12', 'ACC']) };
+  return { name: 'Saturday League', teamName: 'My Team', size: 10, scoring: 'ppr', pointsFrom: HAS_REAL_STATS ? 'real' : 'sim', multi: true, draftType: 'live', pickSeconds: 90, confs: new Set(['SEC', 'BIG10', 'BIG12', 'ACC']) };
 }
 function resetFilters() { UI.f = { pos: 'ALL', conf: 'ALL', q: '', sort: 'proj' }; }
 
@@ -491,11 +491,14 @@ function viewCreate() {
 
   ${Store.mode === 'cloud' ? `<div class="card">
     <h3 class="card-h">Who's playing?</h3>
-    <div class="chips">
-      <button class="chip ${!c.multi ? 'on' : ''}" data-act="multi" data-id="0">Just me vs CPU</button>
-      <button class="chip ${c.multi ? 'on' : ''}" data-act="multi" data-id="1">With friends</button>
+    <div class="who-pick">
+      <button class="who ${c.multi ? 'on' : ''}" data-act="multi" data-id="1">
+        <svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 19c.6-3.2 3-5 6-5s5.4 1.8 6 5"/><circle cx="17" cy="9" r="2.6"/><path d="M15.5 14.2c2.6-.4 4.9 1.1 5.5 4.8"/></svg>
+        <span><b>Play with friends</b><small>Get an invite link to send your friends</small></span></button>
+      <button class="who small ${!c.multi ? 'on' : ''}" data-act="multi" data-id="0">
+        <span><b>Practice vs CPU</b><small>Just you against computer teams</small></span></button>
     </div>
-    ${c.multi ? `<p class="muted small">You'll get an invite link. Open spots become CPU teams when you start the draft.</p>
+    ${c.multi ? `<p class="muted small">After you create the league, share the invite link. Any open spots become CPU teams when you start the draft.</p>
     <h3 class="card-h">Draft style</h3>
     <div class="chips">
       <button class="chip ${c.draftType === 'live' ? 'on' : ''}" data-act="dtype" data-id="live">Live draft</button>
@@ -2280,6 +2283,34 @@ window.addEventListener('hashchange', readInvite);
 window.addEventListener('online', () => { toast('Back online.'); render(); });
 window.addEventListener('offline', () => render());
 
+/* ---------- Updates ----------
+   Phones (and the iPhone app) can hang on to an old copy of FCFB. This asks
+   GitHub for the newest index.html and reloads if there's a newer version,
+   so updates show up without deleting or reinstalling anything. */
+function myVersion() {
+  const s = document.querySelector('script[src*="app.js?v="]');
+  const m = s && s.getAttribute('src').match(/v=(\d+)/);
+  return m ? +m[1] : 0;
+}
+function checkForUpdate() {
+  if (!navigator.onLine || busy || UI.modal || (UI.chat && UI.chat.draft)) return;
+  const lg = activeLeague();
+  if (lg && lg.phase === 'draft') return; // never interrupt a draft
+  fetch('index.html?check=' + Date.now(), { cache: 'no-store' })
+    .then(r => r.ok ? r.text() : '')
+    .then(html => {
+      const m = html.match(/app\.js\?v=(\d+)/);
+      const latest = m ? +m[1] : 0;
+      const mine = myVersion();
+      if (!latest || !mine || latest <= mine) return;
+      const key = 'fcfb-updated-to';
+      try { if (sessionStorage.getItem(key) === String(latest)) return; sessionStorage.setItem(key, String(latest)); } catch (e) { /* ignore */ }
+      // A new address makes the phone fetch everything fresh.
+      location.replace(location.pathname + '?u=' + latest + location.hash);
+    })
+    .catch(() => {});
+}
+
 /* ---------- Make sure the styles loaded ----------
    If a phone failed to download style.css (or kept a bad copy), fetch it
    again so the app never shows up unstyled. */
@@ -2316,6 +2347,9 @@ function ensureStyles(attempt = 0) {
   ensureStyles();
   setTimeout(ensureStyles, 1500);
   Native.setup();
+  setTimeout(checkForUpdate, 4000);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkForUpdate(); });
+  setInterval(checkForUpdate, 10 * 60 * 1000);
   Store.init();
   readInvite();
   render();
