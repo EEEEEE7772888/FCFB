@@ -81,6 +81,7 @@ const Store = {
       } else {
         ME_UID = 'signed-out';
         this.blocked = [];
+        this.avatar = null;
       }
       this.onChange();
     });
@@ -232,13 +233,22 @@ const Store = {
     return this.db.collection('users').doc(ME_UID).get().then(snap => {
       const d = snap.exists ? snap.data() : {};
       this.blocked = Array.isArray(d.blocked) ? d.blocked : [];
+      this.avatar = d.avatar && typeof d.avatar === 'object' ? d.avatar : null;
       this.onChange();
     }).catch(err => console.error(err));
   },
   saveBlocked(list) {
     this.blocked = list.slice(0, 200);
     this.onChange();
-    return this.db.collection('users').doc(ME_UID).set({ blocked: this.blocked });
+    return this.db.collection('users').doc(ME_UID).set({ blocked: this.blocked }, { merge: true });
+  },
+  // Your profile picture: a color plus an emoji (or your initial).
+  avatar: null,
+  saveAvatar(av) {
+    this.avatar = av;
+    this.onChange();
+    if (this.mode !== 'cloud' || !this.user) return Promise.resolve();
+    return this.db.collection('users').doc(ME_UID).set({ avatar: av }, { merge: true });
   },
   async deleteAccount() {
     const uid = ME_UID;

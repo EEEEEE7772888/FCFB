@@ -101,6 +101,12 @@ function teamHue(t) {
   for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
   return TEAM_HUES[h % TEAM_HUES.length];
 }
+function profileAvatar(av) {
+  av = av || Store.avatar || {};
+  const initial = esc((Store.displayName()[0] || '?').toUpperCase());
+  const bg = Number.isFinite(av.color) ? `background:hsl(${av.color} 55% 38%);color:#fff` : '';
+  return `<span class="pav" style="${bg}">${av.emoji ? `<span class="av-emoji">${esc(av.emoji)}</span>` : initial}</span>`;
+}
 function teamAvatar(t, size = '') {
   const name = (t && t.name) || '?';
   const initials = name.replace(/[^A-Za-z0-9 ]/g, '').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('') || '?';
@@ -151,7 +157,26 @@ function render() {
   }
   app.innerHTML = html;
   document.body.classList.toggle('saving', busy);
-  document.getElementById('modal-root').innerHTML = UI.modal ? viewModal(lg) : '';
+  // Re-drawing an open sheet (like tapping a color) shouldn't replay its
+  // slide-in animation or jump back to the top.
+  const mroot = document.getElementById('modal-root');
+  const oldModal = mroot.querySelector('.modal');
+  const sameModal = !!(oldModal && UI.modal && mroot.dataset.mtype === UI.modal.type);
+  const mScroll = oldModal ? oldModal.scrollTop : 0;
+  mroot.innerHTML = UI.modal ? viewModal(lg) : '';
+  mroot.dataset.mtype = UI.modal ? UI.modal.type : '';
+  mroot.classList.toggle('still', sameModal);
+  if (sameModal) { const m = mroot.querySelector('.modal'); if (m) m.scrollTop = mScroll; }
+  const hms = document.getElementById('hm-scroll');
+  if (hms) hms.addEventListener('scroll', () => {
+    const i = Math.round(hms.scrollLeft / (hms.firstElementChild ? hms.firstElementChild.offsetWidth + 12 : 1));
+    document.querySelectorAll('.hm-dots i').forEach((d, k) => d.classList.toggle('on', k === i));
+  }, { passive: true });
+  const rchips = document.querySelector('.rchips');
+  if (rchips) {
+    const on = rchips.querySelector('.rchip.on');
+    if (on) rchips.scrollLeft = Math.max(0, on.offsetLeft - rchips.clientWidth / 2 + on.offsetWidth / 2);
+  }
 
   const bw2 = document.querySelector('.board-wrap');
   if (bw2 && boardScroll) bw2.scrollLeft = boardScroll;
@@ -174,7 +199,7 @@ function header(lg) {
       <button class="brand" data-act="home" aria-label="Home">
         <img class="brand-logo" src="logo.svg?v=2" alt=""><span class="brand-name">FCFB</span>
       </button>
-      ${Store.mode === 'cloud' && Store.user ? `<button class="tb-account" data-act="account" aria-label="Account">${esc((Store.displayName()[0] || '?').toUpperCase())}</button>` : ''}
+      ${Store.mode === 'cloud' && Store.user ? `<button class="tb-account" data-act="account" aria-label="Account and profile picture">${profileAvatar()}</button>` : ''}
     </div></header>`;
   }
   const status = lg.phase === 'lobby' ? 'Lobby' : lg.phase === 'draft' ? 'Draft' : lg.phase === 'done' ? 'Final' : weekLabel(lg.week);
@@ -212,37 +237,86 @@ function leagueStatus(lg) {
   if (lg.phase === 'done') return `<span class="tag tag-gold">${isMe(lg.teams[lg.champion]) ? 'Champion' : 'Season over'}</span>`;
   return `<span class="tag">${weekLabel(lg.week)}</span>`;
 }
+// Short status for the Leagues list, plus whether it needs you (red dot).
+function leaguePill(lg) {
+  const me = userIdx(lg);
+  if (lg.phase === 'lobby') return { text: 'Pre-draft', cls: '', alert: false };
+  if (lg.phase === 'draft') return onClock(lg) === me && me >= 0
+    ? { text: 'Your pick', cls: 'gold', alert: true } : { text: 'Drafting', cls: 'live', alert: false };
+  if (lg.phase === 'done') return { text: isMe(lg.teams[lg.champion]) ? 'Champion' : 'Final', cls: 'gold', alert: false };
+  const offers = incomingTrades(lg).length;
+  return { text: weekLabel(lg.week), cls: '', alert: offers > 0, note: offers ? `${offers} trade offer${offers > 1 ? 's' : ''}` : '' };
+}
+// This week's game for you in a league, scored so far and projected.
+function homeMatchup(lg) {
+  if (['lobby', 'draft'].includes(lg.phase)) return null;
+  const me = userIdx(lg);
+  if (me < 0) return null;
+  const w = Math.min(lg.week, FINAL_WEEK);
+  const played = !!lg.results[w];
+  const games = played ? lg.results[w] : gamesForWeek(lg, w).map(([x, y]) => liveGame(lg, x, y, w));
+  const g = games.find(x => x.a === me || x.b === me);
+  if (!g) return null;
+  const mineA = g.a === me;
+  const scored = lines => (lines || []).reduce((s, l) => s + (l.done ? l.pts : 0), 0);
+  const side = (ti, total, lines) => ({ t: lg.teams[ti], now: played ? total : round1(scored(lines)), proj: total });
+  const A = side(g.a, g.as, g.al), B = side(g.b, g.bs, g.bl);
+  const pa = played ? (g.winner === g.a ? 1 : g.winner === g.b ? 0 : 0.5) : 1 / (1 + Math.exp(-(g.as - g.bs) / 14));
+  return { w, played, me: mineA ? A : B, opp: mineA ? B : A, pMe: mineA ? pa : 1 - pa };
+}
+function matchupCard(lg) {
+  const m = homeMatchup(lg);
+  if (!m) return '';
+  const pct = Math.round(m.pMe * 100);
+  const side = (s, p, right) => `<div class="hm-side ${right ? 'r' : ''}">
+      <div class="hm-row">${right ? '' : teamAvatar(s.t, 'lg')}<div class="hm-nums"><b>${fmt(s.now)}</b><small>${m.played ? 'Final' : fmt(s.proj) + ' proj'}</small></div>${right ? teamAvatar(s.t, 'lg') : ''}</div>
+      <div class="hm-bar ${right ? 'r' : ''}"><span>${p}%</span><i><u style="width:${p}%"></u></i></div>
+      <div class="hm-team"><b>${esc(s.t.name)}</b><small>${isHuman(s.t) ? esc(isMe(s.t) ? 'You' : (s.t.ownerName || 'Friend')) : 'CPU'} · ${record(s.t)}</small></div>
+    </div>`;
+  return `<article class="hm-card">
+    <div class="hm-head"><span class="hm-league">${esc(lg.name)}</span><span class="hm-week">${weekLabel(m.w)}</span></div>
+    <div class="hm-body">${side(m.me, pct, false)}<div class="hm-vs">vs</div>${side(m.opp, 100 - pct, true)}</div>
+    <div class="hm-actions"><button class="btn hm-btn" data-act="open-to" data-id="${lg.id}|team">My Team</button>
+      <button class="btn hm-btn" data-act="open-to" data-id="${lg.id}|matchup">Matchup</button></div>
+  </article>`;
+}
 function viewHome() {
-  const cards = Store.list().map(lg => {
+  const leagues = Store.list();
+  const matchups = leagues.map(matchupCard).filter(Boolean);
+  const rows = leagues.map(lg => {
     const me = lg.teams[userIdx(lg)];
+    const pill = leaguePill(lg);
     const friends = humanCount(lg) - 1;
-    const rank = me && !['lobby', 'draft'].includes(lg.phase) ? standings(lg).findIndex(x => x.id === me.id) + 1 : 0;
-    return `<button class="league-card" data-act="open" data-id="${lg.id}">
+    return `<button class="lrow-home" data-act="open" data-id="${lg.id}">
+      ${pill.alert ? '<span class="lh-dot" aria-label="Needs your attention"></span>' : ''}
       ${teamAvatar(me, 'lg')}
-      <span class="lc-body">
-        <span class="lc-name">${me ? esc(me.name) : esc(lg.name)}</span>
-        <span class="lc-meta">${esc(lg.name)} · ${lg.size} teams${lg.multi ? ` · ${friends} friend${friends === 1 ? '' : 's'}` : ''}</span>
-        <span class="lc-status">${leagueStatus(lg)}</span>
-      </span>
-      ${rank ? `<span class="lc-rec"><b>${record(me)}</b><small>${ordinal(rank)}</small></span>` : ''}
-      <svg class="chev" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg>
+      <span class="lh-body"><span class="lh-name">${esc(lg.name)}</span>
+        <span class="lh-meta">${lg.size}-team ${SCORING_LABEL[lg.scoring]}${me && !['lobby', 'draft'].includes(lg.phase) ? ` · ${record(me)}` : ''}${lg.multi ? ` · ${friends} friend${friends === 1 ? '' : 's'}` : ''}</span>
+        ${pill.note ? `<span class="lh-note">${pill.note}</span>` : ''}</span>
+      <span class="lh-pill ${pill.cls}">${pill.text}</span>
     </button>`;
   }).join('');
   const deviceCount = Store.deviceLeagues().length;
   return `
-  <div class="page-title"><h1>Leagues</h1>
-    <button class="btn btn-primary btn-sm" data-act="new"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>New league</button></div>
+  <div class="qa-row">
+    <button class="qa on" data-act="new"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Create league</button>
+    <button class="qa" data-act="join-open"><svg viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>Join league</button>
+    <button class="qa" data-act="help"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6M12 17h.01"/></svg>How to play</button>
+  </div>
   ${Store.error ? `<div class="banner bad" style="margin-top:14px">${esc(Store.error)}</div>` : ''}
   ${deviceCount ? `<div class="banner info" style="margin-top:14px"><span>You have ${deviceCount} league${deviceCount === 1 ? '' : 's'} saved on this device from before accounts.</span>
     <button class="btn btn-sm" data-act="import">Add to my account</button></div>` : ''}
-  ${!Store.loaded ? `<div class="list-card">${[0, 1].map(() => `<div class="league-card skel"><span class="sk sk-av"></span><span class="lc-body"><span class="sk sk-line"></span><span class="sk sk-line short"></span></span></div>`).join('')}</div>`
-    : cards ? `<div class="list-card">${cards}</div>` : `<div class="empty-card">
+  ${matchups.length ? `<h2 class="home-h">This week</h2>
+    <div class="hm-scroll" id="hm-scroll">${matchups.join('')}</div>
+    ${matchups.length > 1 ? `<div class="hm-dots">${matchups.map((_, i) => `<i class="${i === 0 ? 'on' : ''}"></i>`).join('')}</div>` : ''}` : ''}
+  <h2 class="home-h">Leagues</h2>
+  ${!Store.loaded ? `<div class="list-card">${[0, 1].map(() => `<div class="lrow-home skel"><span class="sk sk-av"></span><span class="lh-body"><span class="sk sk-line"></span><span class="sk sk-line short"></span></span></div>`).join('')}</div>`
+    : rows ? `<div class="list-card">${rows}</div>` : `<div class="empty-card">
     <img class="brand-logo big" src="logo.svg?v=2" alt="FCFB logo">
     <h3>Start your first league</h3>
-    <p>Pick your conferences, draft real college players, and play against friends or CPU managers.</p>
+    <p>Create a league and send the invite link to your friends, or join one with a friend's link.</p>
     <button class="btn btn-primary btn-lg" data-act="new">Create a league</button></div>`}
   ${newsSection()}
-  <button class="help-link" data-act="help"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6M12 17h.01"/></svg>How to play FCFB</button>
   ${Store.mode === 'cloud' ? `<div class="account-row"><span class="muted small">Signed in as <b>${esc(Store.user.email || Store.displayName())}</b></span>
     <button class="link" data-act="signout">Sign out</button></div>` : ''}`;
 }
@@ -603,13 +677,13 @@ function viewDraft(lg) {
   </section>`;
 
   const sub = `<div class="subtabs">
-    ${[['players', 'Players'], ['board', 'Draft board'], ['roster', 'My roster']].map(([k, l]) =>
+    ${[['players', 'Players'], ['roster', 'Rosters'], ['board', 'Board']].map(([k, l]) =>
       `<button class="st ${UI.dtab === k ? 'on' : ''}" data-act="dtab" data-id="${k}">${l}</button>`).join('')}
   </div>`;
 
   let body;
   if (UI.dtab === 'board') body = draftBoard(lg);
-  else if (UI.dtab === 'roster') body = rosterReadOnly(lg, lg.teams[me]);
+  else if (UI.dtab === 'roster') body = draftRosters(lg);
   else body = filterBar(lg, false) + `<div id="plist" class="plist">${draftList(lg)}</div>`;
   return clock + sub + body;
 }
@@ -644,6 +718,20 @@ function draftBoard(lg) {
     rows += `<tr><th class="rd">${r + 1}</th>${cells}</tr>`;
   }
   return `<div class="board-wrap"><table class="board"><thead><tr><th class="rd">Rd</th>${cols}</tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+// Any team's picks so far: tap a team at the top to switch.
+function draftRosters(lg) {
+  const me = userIdx(lg);
+  const sel = Number.isInteger(UI.rteam) && lg.teams[UI.rteam] ? UI.rteam : me;
+  const count = ti => lg.picks.filter(p => p.ti === ti).length;
+  const chips = lg.teams.map((t, i) => `<button class="rchip ${i === sel ? 'on' : ''}" data-act="rteam" data-id="${i}">
+      ${teamAvatar(t, 'sm')}<span class="rchip-n">${i === me ? 'You' : esc(t.name)}</span><span class="rchip-c">${count(i)}</span></button>`).join('');
+  const t = lg.teams[sel];
+  const owner = isHuman(t) && t.ownerName && i_am_not(t) ? ` · ${esc(t.ownerName)}` : !isHuman(t) ? ' · CPU' : '';
+  return `<div class="rchips">${chips}</div>
+    <div class="rteam-h">${teamAvatar(t)}<div><b>${esc(t.name)}</b><small>${count(sel)} of ${DRAFT_ROUNDS} picks${owner}</small></div></div>
+    ${rosterReadOnly(lg, t)}`;
+  function i_am_not(x) { return !isMe(x); }
 }
 function rosterReadOnly(lg, t) {
   const rows = t.starters.map(s => {
@@ -1381,6 +1469,10 @@ function viewModal(lg) {
   if (m.type === 'player' && lg) inner = playerModal(lg, PMAP.get(m.id));
   else if (m.type === 'trade' && lg) inner = tradeModal(lg);
   else if (m.type === 'help') inner = helpModal();
+  else if (m.type === 'join-link') inner = `<h3 class="m-h">Join a league</h3>
+    <p class="muted">Paste the invite link a friend sent you. Opening the link on your phone works too.</p>
+    <label class="field"><span>Invite link</span><input id="join-link" class="input" placeholder="https://…#join=…" autocomplete="off"></label>
+    <button class="btn btn-primary btn-block btn-lg" data-act="join-go">Join</button>`;
   else if (m.type === 'drop' && lg) inner = dropModal(lg, PMAP.get(m.id));
   else if (m.type === 'delete') {
     inner = `<h3 class="m-h">Delete this league?</h3><p class="muted">This removes the league and all of its results${lg && lg.multi ? ' for everyone in it' : ''}.</p>
@@ -1390,7 +1482,13 @@ function viewModal(lg) {
     const notifyOn = canNotify && Notification.permission === 'granted';
     const support = supportEmail();
     const blocked = Store.blocked || [];
+    const pv = UI.pav || Object.assign({ color: null, emoji: '' }, Store.avatar || {});
+    UI.pav = pv;
     inner = `<h3 class="m-h">Account</h3><p class="muted">Signed in as <b>${esc(Store.user ? (Store.user.email || 'Apple ID') : '')}</b></p>
+      <div class="pav-edit"><span class="pav-big">${profileAvatar(pv)}</span><div class="te-label" style="margin:0">Profile picture</div></div>
+      <div class="swatches">${TEAM_HUES.map(h => `<button class="swatch ${pv.color === h ? 'on' : ''}" style="background:hsl(${h} 55% 38%)" data-act="pav-color" data-id="${h}" aria-label="Color"></button>`).join('')}</div>
+      <div class="emoji-grid" style="margin-top:10px"><button class="emoji ${!pv.emoji ? 'on' : ''}" data-act="pav-emoji" data-id="">Aa</button>${TEAM_EMOJIS.map(e => `<button class="emoji ${pv.emoji === e ? 'on' : ''}" data-act="pav-emoji" data-id="${e}">${e}</button>`).join('')}</div>
+      <button class="btn btn-primary btn-block" data-act="save-pav" style="margin:12px 0 6px">Save picture</button>
       <label class="field"><span>Your name (friends see this)</span>
         <div class="invite-row"><input id="acct-name" class="input" maxlength="24" data-afield2="name" value="${esc(UI.acctName != null ? UI.acctName : Store.displayName())}">
         <button class="btn btn-primary" data-act="save-name">Save</button></div></label>
@@ -1602,6 +1700,21 @@ const actions = {
     render(); window.scrollTo(0, 0);
   },
   new() { UI.create = newCreateState(); UI.view = 'create'; render(); window.scrollTo(0, 0); },
+  'open-to'(v) {
+    const [id, tab] = v.split('|');
+    actions.open(id);
+    const lg = Store.get(id);
+    if (lg && !['lobby', 'draft'].includes(lg.phase)) { UI.tab = tab; render(); }
+  },
+  'join-open'() { UI.joinLink = ''; UI.modal = { type: 'join-link' }; render(); },
+  'join-go'() {
+    const raw = (document.getElementById('join-link') || {}).value || '';
+    const m = raw.match(/join=([A-Za-z0-9]+)/) || raw.trim().match(/^([A-Za-z0-9]{6,})$/);
+    if (!m) { toast("That doesn't look like an invite link. Ask your friend to send it again."); return; }
+    UI.modal = null;
+    location.hash = 'join=' + m[1];
+    readInvite();
+  },
   open(id) {
     const lg = Store.get(id);
     if (!lg) return;
@@ -1640,7 +1753,13 @@ const actions = {
       .then(() => toast('Check your email for a link to reset your password.'))
       .catch(err => { UI.auth.error = authError(err); render(); });
   },
-  account() { UI.acctName = null; UI.modal = { type: 'account' }; render(); },
+  account() { UI.acctName = null; UI.pav = null; UI.modal = { type: 'account' }; render(); },
+  'pav-color'(id) { UI.pav.color = +id; render(); },
+  'pav-emoji'(id) { UI.pav.emoji = id; render(); },
+  'save-pav'() {
+    const av = { color: Number.isFinite(UI.pav.color) ? UI.pav.color : null, emoji: UI.pav.emoji || '' };
+    Store.saveAvatar(av).then(() => toast('Profile picture saved.')).catch(() => toast("Couldn't save. Try again."));
+  },
   'news-more'() { UI.newsAll = !UI.newsAll; render(); },
 
   /* ----- Account ----- */
@@ -1828,6 +1947,7 @@ const actions = {
     if (id === 'chat') scrollChat(); else window.scrollTo(0, 0);
   },
   dtab(id) { UI.dtab = id; render(); },
+  rteam(id) { UI.rteam = +id; render(); },
   fpos(id) { UI.f.pos = id; render(); },
   draft(id) {
     Native.tap('MEDIUM');

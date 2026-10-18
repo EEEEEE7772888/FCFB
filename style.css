@@ -651,3 +651,78 @@ button.bubble { text-align: left; cursor: pointer; color: inherit; font: inherit
 .msg-actions { display: flex; flex-direction: column; gap: 8px; }
 .msg-actions .btn-block { margin-top: 0; }
 .chat-empty small { display: block; margin-top: 8px; color: var(--faint); }
+
+/* ---------- Profile picture ---------- */
+.tb-account { padding: 0; overflow: hidden; }
+.pav { width: 100%; height: 100%; border-radius: 50%; display: grid; place-items: center; background: var(--surface-3); font-weight: 700; font-size: 14px; }
+.pav .av-emoji { font-size: 17px; }
+.pav-edit { display: flex; align-items: center; gap: 14px; margin: 14px 0 12px; }
+.pav-big { width: 56px; height: 56px; display: block; flex: none; }
+.pav-big .pav { font-size: 22px; }
+.pav-big .av-emoji { font-size: 28px; }
+
+/* ---------- Draft: any team's roster ---------- */
+.rchips { display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 12px; scrollbar-width: none; }
+.rchips::-webkit-scrollbar { display: none; }
+.rchip { flex: none; display: flex; align-items: center; gap: 8px; padding: 6px 12px 6px 6px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); max-width: 190px; min-height: 44px; }
+.rchip.on { background: var(--accent-soft); border-color: var(--accent); }
+.rchip-n { font-weight: 700; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rchip-c { font-size: 12px; font-weight: 700; color: var(--muted); background: var(--surface-2); border-radius: 999px; padding: 1px 7px; }
+.rteam-h { display: flex; align-items: center; gap: 12px; margin: 4px 2px 12px; }
+.rteam-h b { display: block; font-size: 17px; }
+.rteam-h small { color: var(--muted); font-size: 13px; }
+#modal-root.still .backdrop, #modal-root.still .modal { animation: none; }
+
+/* ---------- Home: quick actions (ESPN-style pills) ---------- */
+.qa-row { display: flex; gap: 8px; overflow-x: auto; margin: 4px -16px 6px; padding: 4px 16px; scrollbar-width: none; }
+.qa-row::-webkit-scrollbar { display: none; }
+.qa { flex: none; display: flex; align-items: center; gap: 7px; min-height: 44px; padding: 0 16px 0 13px; border-radius: 999px;
+  background: var(--surface-2); color: var(--text); font-weight: 700; font-size: 15px; }
+.qa svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.qa.on { background: var(--accent); color: #fff; }
+.home-h { font-size: 21px; font-weight: 800; letter-spacing: -0.02em; margin: 22px 4px 10px; }
+
+/* ---------- Home: matchup card (swipe between leagues) ---------- */
+.hm-scroll { display: flex; gap: 12px; overflow-x: auto; scroll-snap-type: x mandatory; margin: 0 -16px; padding: 0 16px 4px; scrollbar-width: none; }
+.hm-scroll::-webkit-scrollbar { display: none; }
+.hm-card { flex: 0 0 100%; scroll-snap-align: center; box-sizing: border-box; background: var(--surface); border-radius: 20px; padding: 16px; }
+.hm-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-bottom: 12px; border-bottom: 1px dashed var(--surface-3); }
+.hm-league { font-weight: 800; font-size: 17px; text-transform: uppercase; letter-spacing: .02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hm-week { flex: none; font-size: 13px; font-weight: 700; color: var(--muted); background: var(--surface-2); border-radius: 999px; padding: 5px 12px; }
+.hm-body { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 8px; padding: 16px 0 14px; border-bottom: 1px dashed var(--surface-3); }
+.hm-vs { align-self: start; margin-top: 16px; color: var(--faint); font-size: 12px; font-weight: 700; }
+.hm-side { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.hm-row { display: flex; align-items: center; gap: 10px; }
+.hm-side.r .hm-row { justify-content: flex-end; }
+.hm-nums { display: flex; flex-direction: column; min-width: 0; }
+.hm-side.r .hm-nums { align-items: flex-end; }
+.hm-nums b { font-size: 32px; line-height: 1; font-weight: 800; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+.hm-nums small { font-size: 12px; color: var(--muted); margin-top: 4px; white-space: nowrap; }
+.hm-bar { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; }
+.hm-bar.r { flex-direction: row-reverse; }
+.hm-bar i { flex: 1; height: 6px; border-radius: 6px; background: var(--surface-3); overflow: hidden; display: flex; }
+.hm-bar.r i { justify-content: flex-end; }
+.hm-bar u { display: block; height: 100%; border-radius: 6px; background: var(--win); }
+.hm-team { display: flex; flex-direction: column; min-width: 0; }
+.hm-side.r .hm-team { align-items: flex-end; text-align: right; }
+.hm-team b { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.hm-team small { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.hm-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding-top: 14px; }
+.hm-btn { min-height: 44px; border-radius: 999px; background: transparent; border: 1.5px solid var(--accent); color: var(--accent); font-weight: 700; font-size: 15px; }
+.hm-dots { display: flex; justify-content: center; gap: 8px; margin-top: 10px; }
+.hm-dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--surface-3); }
+.hm-dots i.on { background: var(--text); }
+
+/* ---------- Home: leagues list (Sleeper-style) ---------- */
+.lrow-home { position: relative; display: flex; align-items: center; gap: 14px; width: 100%; padding: 14px 16px 14px 18px; text-align: left; color: var(--text); border-bottom: 1px solid var(--line-soft); }
+.lrow-home:last-child { border-bottom: 0; }
+.lrow-home:active { background: var(--surface-2); }
+.lh-dot { position: absolute; left: 5px; top: 50%; width: 8px; height: 8px; margin-top: -4px; border-radius: 50%; background: var(--loss); }
+.lh-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.lh-name { font-weight: 800; font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lh-meta { font-size: 13.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lh-note { font-size: 12.5px; color: var(--loss); font-weight: 600; }
+.lh-pill { flex: none; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; padding: 6px 11px; border-radius: 999px;
+  background: var(--accent-soft); color: #7fb2ff; }
+.lh-pill.live { background: rgba(47, 210, 122, .14); color: var(--win); }
+.lh-pill.gold { background: rgba(246, 189, 58, .16); color: var(--gold); }
